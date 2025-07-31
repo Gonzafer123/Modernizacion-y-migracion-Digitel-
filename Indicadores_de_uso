@@ -12,44 +12,49 @@ config {
     description: "INDICADORES DE USO",
     tags: ["materialization"]
 }
---
-WITH 
+-- ---------------------------------------------------------------------------------
+
+WITH params AS 
+(
+  SELECT 
+    DATE("${require("includes/variables").get_cal_date()}") AS CAL_DATE    
+),
 universo_msisdns_temp AS (
     SELECT DISTINCT CAST(msisdn AS STRING) as msisdn    -- Query para balances
-    FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_BALANCE_ADJUSTMENTS`
-    WHERE DATE(EVENT_DATE) = CURRENT_DATE()-1
+    FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_BALANCE_ADJUSTMENTS`, params
+    WHERE DATE(EVENT_DATE) = params.CAL_DATE
     
     UNION DISTINCT
     
     SELECT DISTINCT CAST(MSISDN AS STRING) as msisdn   -- Query para trafico de datos
-    FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.USAGE_GPRS`
-    WHERE DATE(calling_date) = CURRENT_DATE()-1
+    FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.USAGE_GPRS`, params
+    WHERE DATE(calling_date) = params.CAL_DATE
     
     UNION DISTINCT
     
     SELECT DISTINCT CAST(MSISDN AS STRING) as msisdn    -- Query para llamadas salientes
-    FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.USAGE_VOICE`
-    WHERE DATE(calling_date) = CURRENT_DATE()-1
+    FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.USAGE_VOICE`, params
+    WHERE DATE(calling_date) = params.CAL_DATE
     
     UNION DISTINCT
     
     SELECT DISTINCT CAST(MSISDN AS STRING) as msisdn    -- Query para mensajes salientes
-    FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.USAGE_SMS`
-    WHERE DATE(calling_date) = CURRENT_DATE()-1
+    FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.USAGE_SMS`, params
+    WHERE DATE(calling_date) = params.CAL_DATE
     
     UNION DISTINCT
     
     SELECT DISTINCT CAST(MSISDN_B AS STRING) as msisdn -- Query para llamadas entrantes
-    FROM `etl-service-proj.TRAFICO_PROD.CALL`
+    FROM `etl-service-proj.TRAFICO_PROD.CALL`, params
     WHERE 1=1 
     AND RECORD_TYPE IN ('POC') 
     AND IX_SEG_A != ''
-    AND DATE(RECORD_DATE) = CURRENT_DATE()-1
+    AND DATE(RECORD_DATE) = params.CAL_DATE
 
     UNION DISTINCT
     
     SELECT DISTINCT CAST(MSISDN_B AS STRING) as msisdn -- Query para mensajes entrantes
-    FROM `etl-service-proj.TRAFICO_PROD.CALL`
+    FROM `etl-service-proj.TRAFICO_PROD.CALL`, params
     WHERE 1=1 
     AND RECORD_TYPE = 'SMMT'
     AND IX_SEG_B IS NOT NULL 
@@ -57,7 +62,7 @@ universo_msisdns_temp AS (
     AND MSISDN_B NOT LIKE '00%'
     AND MSISDN_A NOT LIKE '58412%'
     AND MSISDN_A NOT LIKE '58422%'
-    AND DATE(RECORD_DATE) = CURRENT_DATE()-1
+    AND DATE(RECORD_DATE) = params.CAL_DATE
 ),
 
 universo_msisdns AS (
@@ -199,7 +204,7 @@ bloqueo_ldi AS (
         -- POSTPAGO
         SELECT 
             C.MSISDN
-        FROM `etl-service-proj.EB20_PROD_Zona_Cruda.SYSADM_PROFILE_SERVICE` PRS
+        FROM `etl-service-proj.EB20_PROD_Zona_Cruda.SYSADM_PROFILE_SERVICE` PRS, params
         LEFT JOIN `etl-service-proj.EB20_PROD_Zona_Cruda.SYSADM_PR_SERV_STATUS_HIST` sth 
             ON CAST(sth.histno AS STRING) = CAST(prs.status_histno AS STRING)
         LEFT JOIN (
@@ -217,7 +222,7 @@ bloqueo_ldi AS (
         ) C ON CAST(C.CO_ID AS STRING) = CAST(prs.co_id AS STRING)
         WHERE CAST(prs.SNCODE AS INT64) = 12
             AND sth.status = 'A'
-            AND DATE(prs.entry_date) <= CURRENT_DATE()
+            AND DATE(prs.entry_date) <= params.CAL_DATE -- validar con enrique 
     )
     GROUP BY CAST(msisdn AS STRING)
 ),
