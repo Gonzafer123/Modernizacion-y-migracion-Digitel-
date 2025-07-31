@@ -1,0 +1,354 @@
+-- --------------------------------------------------------------------------------
+-- INFO
+-- AUTHOR: VILLAFAÑE GONZALO FERNANDO
+-- CREATED: 07/07/2025
+-- UPDATED: 29/07/2025
+-- --------------------------------------------------------------------------------
+
+config {
+    type: "table",
+    schema: "SILVER",
+    name: "INDICADORES_DE_USOTXT_TABLE",
+    description: "INDICADORES DE USO",
+    tags: ["materialization"]
+}
+--
+WITH 
+universo_msisdns_temp AS (
+    SELECT DISTINCT CAST(msisdn AS STRING) as msisdn    -- Query para balances
+    FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_BALANCE_ADJUSTMENTS`
+    WHERE DATE(EVENT_DATE) = CURRENT_DATE()-1
+    
+    UNION DISTINCT
+    
+    SELECT DISTINCT CAST(MSISDN AS STRING) as msisdn   -- Query para trafico de datos
+    FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.USAGE_GPRS`
+    WHERE DATE(calling_date) = CURRENT_DATE()-1
+    
+    UNION DISTINCT
+    
+    SELECT DISTINCT CAST(MSISDN AS STRING) as msisdn    -- Query para llamadas salientes
+    FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.USAGE_VOICE`
+    WHERE DATE(calling_date) = CURRENT_DATE()-1
+    
+    UNION DISTINCT
+    
+    SELECT DISTINCT CAST(MSISDN AS STRING) as msisdn    -- Query para mensajes salientes
+    FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.USAGE_SMS`
+    WHERE DATE(calling_date) = CURRENT_DATE()-1
+    
+    UNION DISTINCT
+    
+    SELECT DISTINCT CAST(MSISDN_B AS STRING) as msisdn -- Query para llamadas entrantes
+    FROM `etl-service-proj.TRAFICO_PROD.CALL`
+    WHERE 1=1 
+    AND RECORD_TYPE IN ('POC') 
+    AND IX_SEG_A != ''
+    AND DATE(RECORD_DATE) = CURRENT_DATE()-1
+
+    UNION DISTINCT
+    
+    SELECT DISTINCT CAST(MSISDN_B AS STRING) as msisdn -- Query para mensajes entrantes
+    FROM `etl-service-proj.TRAFICO_PROD.CALL`
+    WHERE 1=1 
+    AND RECORD_TYPE = 'SMMT'
+    AND IX_SEG_B IS NOT NULL 
+    AND IX_SEG_B <> 'NO_CATEG' 
+    AND MSISDN_B NOT LIKE '00%'
+    AND MSISDN_A NOT LIKE '58412%'
+    AND MSISDN_A NOT LIKE '58422%'
+    AND DATE(RECORD_DATE) = CURRENT_DATE()-1
+),
+
+universo_msisdns AS (
+    SELECT msisdn 
+    FROM universo_msisdns_temp
+    WHERE msisdn IS NOT NULL 
+      AND (
+        (REGEXP_CONTAINS(msisdn, r'^58[24][0-9]{9}$') AND LENGTH(msisdn) = 12) OR
+        (REGEXP_CONTAINS(msisdn, r'^041[12][0-9]{7}$') AND LENGTH(msisdn) = 11) OR
+        (REGEXP_CONTAINS(msisdn, r'^0422[0-9]{7}$') AND LENGTH(msisdn) = 11)
+      )
+),
+
+-- CTE 1: Fecha última recarga en Bs
+ultima_recarga_bs AS (
+    SELECT 
+        CAST(A.msisdn AS STRING) AS msisdn,
+        MAX(A.event_date) AS FECHA_ULTIMA_RECARGA_BS
+    FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_BALANCE_ADJUSTMENTS` A
+    LEFT JOIN `etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_BALANCE_CHANGE` B 
+        ON B.event_id = A.event_id
+    WHERE A.source IN ('BONUS','RELOAD')
+        AND B.balance_name = 'B_LPP_Bs_Main'
+    GROUP BY CAST(A.msisdn AS STRING)
+),
+
+-- CTE 2: Fecha última recarga en USD
+ultima_recarga_usd AS (
+    SELECT 
+        CAST(A.msisdn AS STRING) AS msisdn,
+        MAX(A.event_date) AS FECHA_ULTIMA_RECARGA_USD
+    FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_BALANCE_ADJUSTMENTS` A
+    LEFT JOIN `etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_BALANCE_CHANGE` B 
+        ON B.event_id = A.event_id
+    WHERE A.source IN ('BONUS','RELOAD')
+        AND B.balance_name = 'B_LPP_USD'
+    GROUP BY CAST(A.msisdn AS STRING)
+),
+
+-- CTE 3: Indicador de registro en App Móvil
+registro_app AS (
+    SELECT 
+        CAST(line_number AS STRING) AS msisdn,
+        CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END AS IND_REG_APP
+    FROM `etl-service-proj.BDWEBSAT_PROD_Zona_Cruda.APP_MOVIL_LINES`
+    GROUP BY CAST(line_number AS STRING)
+),
+
+-- CTE 4: Indicador de cambio de plan
+cambio_plan AS (
+    SELECT 
+        CAST('58'||SUBSTR(E.COMPONENT_VALUE,2) AS STRING) AS msisdn,
+        CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END AS IND_CAMBIO_PLAN
+    FROM etl-service-proj.BDUC_PROD_Zona_Cruda.CRM360_IC_ORDER_ITEMS A
+    LEFT JOIN etl-service-proj.BDUC_PROD_Zona_Cruda.CRM360_IC_ORDER ic 
+        ON ic.id_order = a.id_order 
+    LEFT JOIN ( 
+        SELECT * FROM etl-service-proj.BDUC_PROD_Zona_Cruda.CRM360_IC_ORDER_ITEMS
+        WHERE ID_ORDER IN (
+            SELECT DISTINCT ID_ORDER 
+            FROM etl-service-proj.BDUC_PROD_Zona_Cruda.CRM360_IC_ORDER 
+            WHERE id_order_type='OT-014'
+        )
+        AND id_order_item_type='OIT-004'
+        AND id_component_type='CT-005'
+        AND id_component='INV-001'
+    ) E ON E.ID_ORDER = A.id_order 
+    WHERE A.ID_ORDER IN (
+        SELECT DISTINCT ID_ORDER 
+        FROM etl-service-proj.BDUC_PROD_Zona_Cruda.CRM360_IC_ORDER 
+        WHERE id_order_type='OT-014'
+    )
+    AND A.id_order_item_type='OIT-002' 
+    AND ic.order_status = 0  
+    AND E.COMPONENT_VALUE IS NOT NULL  
+    GROUP BY CAST('58'||SUBSTR(E.COMPONENT_VALUE,2) AS STRING)
+),
+
+-- CTE 5: Indicador de cambio de modalidad
+cambio_modalidad AS (
+    SELECT
+        CAST('58'||SUBSTR(E.COMPONENT_VALUE,2) AS STRING) AS msisdn,
+        CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END AS IND_CAMBIO_MODALIDAD
+    FROM etl-service-proj.BDUC_PROD_Zona_Cruda.CRM360_IC_ORDER_ITEMS A
+    LEFT JOIN etl-service-proj.BDUC_PROD_Zona_Cruda.CRM360_IC_ORDER ic 
+        ON ic.id_order = a.id_order 
+    LEFT JOIN (
+        SELECT * FROM etl-service-proj.BDUC_PROD_Zona_Cruda.CRM360_IC_ORDER_ITEMS
+        WHERE ID_ORDER IN (
+            SELECT DISTINCT ID_ORDER 
+            FROM etl-service-proj.BDUC_PROD_Zona_Cruda.CRM360_IC_ORDER
+            WHERE id_order_type='OT-044'
+        )
+        AND id_order_item_type='OIT-004'
+        AND id_component_type='CT-005'
+        AND id_component='INV-001'
+    ) E ON E.ID_ORDER = A.id_order
+    WHERE A.ID_ORDER IN (
+        SELECT DISTINCT ID_ORDER
+        FROM etl-service-proj.BDUC_PROD_Zona_Cruda.CRM360_IC_ORDER
+        WHERE id_order_type='OT-044'
+    )
+    AND A.id_order_item_type = 'OIT-002'
+    AND ic.order_status = 0
+    AND E.COMPONENT_VALUE IS NOT NULL 
+    GROUP BY CAST('58'||SUBSTR(E.COMPONENT_VALUE,2) AS STRING)
+),
+
+-- CTE 6: Indicador de bloqueo LDI 
+bloqueo_ldi AS (
+    SELECT 
+        CAST(msisdn AS STRING) AS msisdn,
+        1 AS IND_BLOQUEO_LDI
+    FROM (
+        -- PREPAGO
+        SELECT
+            a.Value AS msisdn
+        FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_EVENT_MAPPING_TBL` a
+        LEFT JOIN `etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_SOLD_PRODUCT_TBL` b 
+            ON CAST(a.account_fk AS STRING) = CAST(b.account_fk AS STRING)
+        LEFT JOIN (
+            SELECT DISTINCT CAST(account_fk AS STRING) AS account_fk 
+            FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_SOLD_COMPONENT_TBL`  
+            WHERE lc_state = 'ACT'
+        ) C ON CAST(C.account_fk AS STRING) = CAST(a.account_fk AS STRING)
+        WHERE CAST(a.ext_id_type_code_id AS INT64) = 2
+            AND a.valid_to IS NOT NULL 
+            AND TIMESTAMP(REGEXP_EXTRACT(a.valid_to, r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})')) > CURRENT_TIMESTAMP()
+            AND b.SOLD_PRODUCT_NAME LIKE 'S_LPR_Bloqueo_LDI%'
+            AND CAST(b.is_dead AS INT64) = 0
+            AND CAST(a.account_fk AS STRING) IN (
+                SELECT DISTINCT CAST(account_fk AS STRING) 
+                FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_SOLD_COMPONENT_TBL` 
+                WHERE lc_state = 'ACT'
+            )
+        
+        UNION ALL
+        
+        -- POSTPAGO
+        SELECT 
+            C.MSISDN
+        FROM `etl-service-proj.EB20_PROD_Zona_Cruda.SYSADM_PROFILE_SERVICE` PRS
+        LEFT JOIN `etl-service-proj.EB20_PROD_Zona_Cruda.SYSADM_PR_SERV_STATUS_HIST` sth 
+            ON CAST(sth.histno AS STRING) = CAST(prs.status_histno AS STRING)
+        LEFT JOIN (
+            SELECT
+                CAST(CO.CO_ID AS STRING) AS CO_ID,
+                CO.CH_STATUS,
+                DN.DN_NUM AS MSISDN
+            FROM `etl-service-proj.EB20_PROD_Zona_Cruda.SYSADM_CONTRACT_ALL` CO
+            INNER JOIN `etl-service-proj.EB20_PROD_Zona_Cruda.SYSADM_CONTR_SERVICES_CAP` CSC 
+                ON CAST(CSC.CO_ID AS STRING) = CAST(CO.CO_ID AS STRING) 
+                AND CSC.MAIN_DIRNUM = 'X' 
+                AND CSC.CS_DEACTIV_DATE IS NULL
+            INNER JOIN `etl-service-proj.EB20_PROD_Zona_Cruda.SYSADM_DIRECTORY_NUMBER` DN 
+                ON CAST(DN.DN_ID AS STRING) = CAST(CSC.DN_ID AS STRING)
+        ) C ON CAST(C.CO_ID AS STRING) = CAST(prs.co_id AS STRING)
+        WHERE CAST(prs.SNCODE AS INT64) = 12
+            AND sth.status = 'A'
+            AND DATE(prs.entry_date) <= CURRENT_DATE()
+    )
+    GROUP BY CAST(msisdn AS STRING)
+),
+
+-- CTE 7: Indicador de paquetes de datos activos
+paquetes_datos AS (
+    SELECT 
+        CAST(msisdn AS STRING) AS msisdn,
+        1 AS IND_PAQUETE_DATOS
+    FROM (
+        -- POSTPAGO
+        SELECT
+            c.msisdn
+        FROM etl-service-proj.EB20_PROD_Zona_Cruda.SYSADM_PROFILE_SERVICE PRS
+        LEFT OUTER JOIN etl-service-proj.EB20_PROD_Zona_Cruda.SYSADM_MPUSNTAB mp 
+            ON CAST(mp.sncode AS STRING) = CAST(prs.sncode AS STRING)  
+        LEFT OUTER JOIN etl-service-proj.EB20_PROD_Zona_Cruda.SYSADM_PR_SERV_STATUS_HIST sth 
+            ON CAST(sth.histno AS STRING) = CAST(prs.status_histno AS STRING) 
+        LEFT OUTER JOIN (
+            SELECT
+                CAST(CO.CO_ID AS STRING) AS CO_ID, 
+                CO.CH_STATUS,
+                DN.DN_NUM MSISDN
+            FROM etl-service-proj.EB20_PROD_Zona_Cruda.SYSADM_CONTRACT_ALL CO
+            INNER JOIN etl-service-proj.EB20_PROD_Zona_Cruda.SYSADM_CONTR_SERVICES_CAP CSC 
+                ON CAST(CSC.CO_ID AS STRING) = CAST(CO.CO_ID AS STRING)  
+                AND CSC.MAIN_DIRNUM = 'X' 
+                AND CSC.CS_DEACTIV_DATE IS NULL
+            INNER JOIN etl-service-proj.EB20_PROD_Zona_Cruda.SYSADM_DIRECTORY_NUMBER DN 
+                ON CAST(DN.DN_ID AS STRING) = CAST(CSC.DN_ID AS STRING)  
+        ) C ON CAST(C.CO_ID AS STRING) = CAST(prs.co_id AS STRING)  
+        WHERE (mp.des LIKE 'Paquete%' OR CAST(prs.sncode AS INT64) IN (201,202))  
+            AND sth.status = 'A'
+
+        UNION ALL
+
+        -- PREPAGO - Precompra
+        SELECT
+            B.Value AS msisdn
+        FROM etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_SOLD_PRODUCT_TBL A
+        LEFT JOIN etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_EVENT_MAPPING_TBL B 
+            ON CAST(B.account_fk AS STRING) = CAST(A.account_fk AS STRING) 
+            AND CAST(B.ext_id_type_code_id AS STRING) = '2'
+            AND TIMESTAMP(valid_to) > CURRENT_TIMESTAMP()
+        WHERE A.SOLD_PRODUCT_NAME LIKE '%Precompra%'
+            AND CAST(A.is_dead AS INT64) = 0
+
+        UNION ALL
+
+        -- PREPAGO - Intelflex
+        SELECT
+            a.gsm AS msisdn
+        FROM etl-service-proj.BDUI_PROD_Zona_Cruda.INTELFLEX_IF_BENEFICIARY a
+        INNER JOIN (
+            SELECT 
+                a.id_beneficiary, 
+                a.id_product, 
+                c.display_value AS servicio 
+            FROM etl-service-proj.BDUI_PROD_Zona_Cruda.INTELFLEX_IF_ASSOCIATION_PRODUCT a
+            INNER JOIN etl-service-proj.BDUI_PROD_Zona_Cruda.INTELFLEX_IF_PRODUCT_CFG b 
+                ON CAST(b.id_product AS STRING) = CAST(a.id_product AS STRING)  
+                AND b.display_value LIKE 'Paquete%'
+            LEFT JOIN etl-service-proj.BDUI_PROD_Zona_Cruda.INTELFLEX_IF_PRODUCT_CFG c 
+                ON CAST(c.id_product AS STRING) = CAST(b.id_product AS STRING)  
+            WHERE a.inactive_dt IS NULL
+        ) b ON CAST(b.id_beneficiary AS STRING) = CAST(a.id_beneficiary AS STRING)  
+    )
+    GROUP BY CAST(msisdn AS STRING)
+),
+
+-- CTE 8: Fecha último tráfico de datos
+ultimo_trafico_datos AS (
+    SELECT  
+        CAST(MSISDN AS STRING) as msisdn,
+        MAX(CALLING_DATE) AS FECHA_ULT_TRAFICO_DATOS
+    FROM etl-service-proj.HBDB_PROD_Zona_Cruda.USAGE_GPRS
+    WHERE DATE(calling_date) = CURRENT_DATE()-1
+    GROUP BY CAST(MSISDN AS STRING)
+),
+
+-- CTE 9: Fecha último tráfico voz y SMS
+ultimo_trafico_voz_sms AS (
+    SELECT 
+        CAST(msisdn AS STRING) AS msisdn,
+        MAX(calling_date) AS FECHA_ULT_TRAFICO_VOZ_SMS
+    FROM (
+        SELECT CAST(MSISDN AS STRING) as msisdn, CALLING_DATE as calling_date
+        FROM etl-service-proj.HBDB_PROD_Zona_Cruda.USAGE_VOICE
+        WHERE DATE(calling_date) = CURRENT_DATE()-1
+        
+        UNION ALL
+        
+        SELECT CAST(MSISDN AS STRING) as msisdn, CALLING_DATE as calling_date
+        FROM etl-service-proj.HBDB_PROD_Zona_Cruda.USAGE_SMS
+        WHERE DATE(calling_date) = CURRENT_DATE()-1
+    ) t
+    GROUP BY CAST(msisdn AS STRING)
+),
+
+-- CTE 10: Fecha último tráfico entrante
+ultimo_trafico_entrante AS (
+    SELECT 
+        CAST(MSISDN_B AS STRING) as msisdn,
+        MAX(RECORD_DATE) AS FECHA_ULT_TRAFICO_ENT
+    FROM etl-service-proj.TRAFICO_PROD.CALL
+    WHERE RECORD_TYPE IN ('SMMT', 'MTC')
+    GROUP BY CAST(MSISDN_B AS STRING)
+)
+
+-- CONSULTA PRINCIPAL - UNIFICACIÓN FINAL (TABLA COMPLETA)
+SELECT 
+    um.msisdn,
+    urb.FECHA_ULTIMA_RECARGA_BS,
+    uru.FECHA_ULTIMA_RECARGA_USD,
+    utd.FECHA_ULT_TRAFICO_DATOS,
+    utvs.FECHA_ULT_TRAFICO_VOZ_SMS,
+    ute.FECHA_ULT_TRAFICO_ENT,
+    COALESCE(ra.IND_REG_APP, 0) AS IND_REG_APP,
+    COALESCE(bl.IND_BLOQUEO_LDI, 0) AS IND_BLOQUEO_LDI,
+    COALESCE(pd.IND_PAQUETE_DATOS, 0) AS IND_PAQUETE_DATOS,
+    COALESCE(cp.IND_CAMBIO_PLAN, 0) AS IND_CAMBIO_PLAN,
+    COALESCE(cm.IND_CAMBIO_MODALIDAD, 0) AS IND_CAMBIO_MODALIDAD
+FROM universo_msisdns um  
+LEFT JOIN ultima_recarga_bs urb ON um.msisdn = urb.msisdn
+LEFT JOIN ultima_recarga_usd uru ON um.msisdn = uru.msisdn
+LEFT JOIN registro_app ra ON um.msisdn = ra.msisdn
+LEFT JOIN cambio_plan cp ON um.msisdn = cp.msisdn
+LEFT JOIN cambio_modalidad cm ON um.msisdn = cm.msisdn
+LEFT JOIN bloqueo_ldi bl ON um.msisdn = bl.msisdn
+LEFT JOIN paquetes_datos pd ON um.msisdn = pd.msisdn
+LEFT JOIN ultimo_trafico_datos utd ON um.msisdn = utd.msisdn
+LEFT JOIN ultimo_trafico_voz_sms utvs ON um.msisdn = utvs.msisdn
+LEFT JOIN ultimo_trafico_entrante ute ON um.msisdn = ute.msisdn
+ORDER BY um.msisdn
