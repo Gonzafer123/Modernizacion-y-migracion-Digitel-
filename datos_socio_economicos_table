@@ -1,0 +1,263 @@
+-- --------------------------------------------------------------------------------
+-- INFO
+-- AUTHOR: VILLAFAÑE GONZALO FERNANDO
+-- CREATED: 07/07/2025
+-- UPDATED: 24/07/2025
+-- --------------------------------------------------------------------------------
+
+config {
+    type: "table",
+    schema: "SILVER",
+    name: "DATOS_SOCIOECONOMICOSTXT_TABLE",
+    description: "Tabla de unificación de datos socioeconómicos de afiliados - información demográfica, dirección y contacto",
+    tags: ["materialization"]
+}
+
+  -- -- CONFIGURACION DEL ARCHIVO
+WITH
+  max_asset_dates AS (
+  SELECT
+    ASSET_ID,
+    MAX(LAST_UPD_DT) AS max_asset_date
+  FROM
+    `etl-service-proj.BDUC_PROD_Zona_Cruda.BDUC_U_ASSET`
+
+  GROUP BY
+    ASSET_ID ),
+  max_customer_dates AS (
+  SELECT
+    CUSTOMER_ID,
+    MAX(LAST_UPD_DT) AS max_customer_date
+  FROM
+    `etl-service-proj.BDUC_PROD_Zona_Cruda.BDUC_U_CUSTOMER`
+
+  GROUP BY
+    CUSTOMER_ID ),
+  max_asset_customer_dates AS (
+  SELECT
+    CUSTOMER_ID,
+    ASSET_ID,
+    ATC_RL_TYPE_CD,
+    MAX(LAST_UPD_DT) AS max_asset_customer_date
+  FROM
+    `etl-service-proj.BDUC_PROD_Zona_Cruda.BDUC_U_ASSET_CUSTOMER`
+  WHERE
+    ATC_RL_TYPE_CD = 'Afiliado'
+
+  GROUP BY
+    CUSTOMER_ID,
+    ASSET_ID,
+    ATC_RL_TYPE_CD ),
+  max_contact_dates AS (
+  SELECT
+    CUSTOMER_ID,
+    MAP_TYPE_CONTACT,
+    MAX(LAST_UPD_DT) AS max_last_upd_dt
+  FROM
+    `etl-service-proj.BDUC_PROD_Zona_Cruda.BDUC_U_MAP_CONTACT`
+  WHERE
+    MAP_PREFER = 'Y'
+    AND MAP_TYPE_CONTACT IN ('L-5',
+      'L-8')
+
+  GROUP BY
+    CUSTOMER_ID,
+    MAP_TYPE_CONTACT ),
+  base_data AS (
+  SELECT
+    A.AST_NUMBER,
+    A.ASSET_ID,
+    C.CUSTOMER_ID,
+    AC.ATC_RL_TYPE_CD,
+    C.CUS_BIRTH_DT,
+    C.CUS_SEX_MF,
+    C.CUS_MARITAL_STAT,
+    C.CUS_EDUCATION_LEVEL,
+    C.CUS_OCCUPATION,
+    C.CUS_AVG_MONTH_INCOME,
+    DATE_DIFF(CURRENT_DATE(), DATE(C.CUS_BIRTH_DT), YEAR) AS EDAD,
+    CASE
+      WHEN EXTRACT(YEAR FROM C.CUS_BIRTH_DT) BETWEEN 1925 AND 1944 THEN 'Generación Boomers (SILENCIOS)'
+      WHEN EXTRACT(YEAR
+    FROM
+      C.CUS_BIRTH_DT) BETWEEN 1945
+    AND 1964 THEN 'Generación Baby Boomers'
+      WHEN EXTRACT(YEAR FROM C.CUS_BIRTH_DT) BETWEEN 1965 AND 1979 THEN 'Generación X'
+      WHEN EXTRACT(YEAR
+    FROM
+      C.CUS_BIRTH_DT) BETWEEN 1980
+    AND 1998 THEN 'Generación Y (MILLENNIALS)'
+      WHEN EXTRACT(YEAR FROM C.CUS_BIRTH_DT) BETWEEN 1999 AND 2010 THEN 'Generación Z (CENTENNIAL)'
+      WHEN EXTRACT(YEAR
+    FROM
+      C.CUS_BIRTH_DT) >= 2011 THEN 'Generación Alfa'
+      ELSE 'Desconocida'
+  END
+    AS GENERACION
+  FROM
+    `etl-service-proj.BDUC_PROD_Zona_Cruda.BDUC_U_ASSET` A
+  INNER JOIN
+    `etl-service-proj.BDUC_PROD_Zona_Cruda.BDUC_U_ASSET_CUSTOMER` AC
+  ON
+    A.ASSET_ID = AC.ASSET_ID
+  INNER JOIN
+    max_asset_customer_dates macd
+  ON
+    AC.CUSTOMER_ID = macd.CUSTOMER_ID
+    AND AC.ASSET_ID = macd.ASSET_ID
+    AND AC.ATC_RL_TYPE_CD = macd.ATC_RL_TYPE_CD
+    AND AC.LAST_UPD_DT = macd.max_asset_customer_date
+  INNER JOIN
+    `etl-service-proj.BDUC_PROD_Zona_Cruda.BDUC_U_CUSTOMER` C
+  ON
+    AC.CUSTOMER_ID = C.CUSTOMER_ID
+  INNER JOIN
+    max_customer_dates mcd
+  ON
+    C.CUSTOMER_ID = mcd.CUSTOMER_ID
+    AND C.LAST_UPD_DT = mcd.max_customer_date
+  INNER JOIN
+    max_asset_dates mad
+  ON
+    A.ASSET_ID = mad.ASSET_ID
+    AND A.LAST_UPD_DT = mad.max_asset_date
+  WHERE
+    AC.ATC_RL_TYPE_CD = 'Afiliado' ),
+  address_data AS (
+  SELECT
+    bd.CUSTOMER_ID,
+    ADDR.ADD_STREET,
+    ADDR.ADD_HOME_LEVEL,
+    ADDR.ADD_URBANIZATION,
+    ADDR.ADD_CITY,
+    SUBSTR(ADDR.ADD_TOWN, 1, 50) AS MUNICIPIO,
+    ADDR.ADD_STATE,
+    SUBSTR(ADDR.ADD_COMPLETE_ORIGINAL, 1, 255) AS DIRECCION_3,
+    ADDR.ADD_ZIPCODE,
+    ROW_NUMBER() OVER (PARTITION BY bd.CUSTOMER_ID ORDER BY ADDR.LAST_UPD_DT DESC) AS rn
+  FROM
+    base_data bd
+  LEFT JOIN
+    `etl-service-proj.BDUC_PROD_Zona_Cruda.BDUC_U_ADDRESS` ADDR
+  ON
+    bd.CUSTOMER_ID = ADDR.CUSTOMER_ID ),
+  address_data_filtered AS (
+  SELECT
+    CUSTOMER_ID,
+    ADD_STREET,
+    ADD_HOME_LEVEL,
+    ADD_URBANIZATION,
+    ADD_CITY,
+    MUNICIPIO,
+    ADD_STATE,
+    DIRECCION_3,
+    ADD_ZIPCODE
+  FROM
+    address_data
+  WHERE
+    rn = 1 ),
+  email_data AS (
+  SELECT
+    bd.CUSTOMER_ID,
+    D.MAP_CONTACT_INF_VALUE,
+    ROW_NUMBER() OVER (PARTITION BY bd.CUSTOMER_ID ORDER BY CASE WHEN D.MAP_PREFER = 'Y' THEN 1 ELSE 2 END , D.LAST_UPD_DT DESC) AS rn
+  FROM
+    base_data bd
+  LEFT JOIN
+    `etl-service-proj.BDUC_PROD_Zona_Cruda.BDUC_U_MAP_CONTACT` D
+  ON
+    bd.CUSTOMER_ID = D.CUSTOMER_ID
+  WHERE
+    D.MAP_TYPE_CONTACT = 'L-6' ),
+  email_data_filtered AS (
+  SELECT
+    CUSTOMER_ID,
+    MAP_CONTACT_INF_VALUE
+  FROM
+    email_data
+  WHERE
+    rn = 1
+    --
+    ),
+    phone_data AS (
+    SELECT
+      bd.AST_NUMBER,
+      bd.CUSTOMER_ID,
+      MAX(CASE
+          WHEN D.MAP_TYPE_CONTACT = 'L-5' THEN D.MAP_CONTACT_INF_VALUE
+      END
+        ) AS TELEFONO_CONTACTO1,
+      MAX(CASE
+          WHEN D.MAP_TYPE_CONTACT = 'L-8' THEN D.MAP_CONTACT_INF_VALUE
+      END
+        ) AS TELEFONO_CONTACTO2
+    FROM
+      base_data bd
+    INNER JOIN
+      `etl-service-proj.BDUC_PROD_Zona_Cruda.BDUC_U_ASSET_CUSTOMER` B
+    ON
+      bd.ASSET_ID = B.ASSET_ID
+    INNER JOIN
+      max_asset_customer_dates macd
+    ON
+      B.CUSTOMER_ID = macd.CUSTOMER_ID
+      AND B.ASSET_ID = macd.ASSET_ID
+      AND B.ATC_RL_TYPE_CD = macd.ATC_RL_TYPE_CD
+      AND B.LAST_UPD_DT = macd.max_asset_customer_date
+    INNER JOIN
+      `etl-service-proj.BDUC_PROD_Zona_Cruda.BDUC_U_MAP_CONTACT` D
+    ON
+      bd.CUSTOMER_ID = D.CUSTOMER_ID
+    INNER JOIN
+      max_contact_dates mcd
+    ON
+      D.CUSTOMER_ID = mcd.CUSTOMER_ID
+      AND D.MAP_TYPE_CONTACT = mcd.MAP_TYPE_CONTACT
+      AND D.LAST_UPD_DT = mcd.max_last_upd_dt
+    WHERE
+      D.MAP_PREFER = 'Y'
+      AND D.MAP_TYPE_CONTACT IN ('L-5',
+        'L-8')
+      AND B.ATC_RL_TYPE_CD = 'Afiliado'
+    GROUP BY
+      bd.AST_NUMBER,
+      bd.CUSTOMER_ID )
+  SELECT
+    bd.CUSTOMER_ID AS ID_CLIENTE_UNICO,
+    bd.AST_NUMBER,
+    bd.ATC_RL_TYPE_CD,
+    bd.CUS_BIRTH_DT AS FECHA_DE_NACIMIENTO,
+    bd.CUS_SEX_MF AS GENERO,
+    bd.EDAD,
+    bd.CUS_MARITAL_STAT AS ESTADO_CIVIL,
+    bd.GENERACION,
+    ad.ADD_STREET AS AVENIDA_CALLE,
+    ad.ADD_HOME_LEVEL AS EDIFICIO_TORRE,
+    ad.ADD_URBANIZATION AS URBANIZACION,
+    ad.ADD_CITY AS CIUDAD,
+    ad.MUNICIPIO,
+    ad.ADD_STATE AS ESTADO,
+    ad.DIRECCION_3,
+    ad.ADD_ZIPCODE AS CODIGO_POSTAL,
+    bd.CUS_EDUCATION_LEVEL AS GRADO_INSTRUCCION,
+    bd.CUS_OCCUPATION AS OCUPACION,
+    bd.CUS_AVG_MONTH_INCOME AS INGRESOMENSUAL,
+    ed.MAP_CONTACT_INF_VALUE AS EMAIL,
+    pd.TELEFONO_CONTACTO1,
+    pd.TELEFONO_CONTACTO2
+  FROM
+    base_data bd
+  LEFT JOIN
+    address_data_filtered ad
+  ON
+    bd.CUSTOMER_ID = ad.CUSTOMER_ID
+  LEFT JOIN
+    email_data_filtered ed
+  ON
+    bd.CUSTOMER_ID = ed.CUSTOMER_ID
+  LEFT JOIN
+    phone_data pd
+  ON
+    bd.CUSTOMER_ID = pd.CUSTOMER_ID
+    AND bd.AST_NUMBER = pd.AST_NUMBER
+

@@ -1,0 +1,72 @@
+-- --------------------------------------------------------------------------------
+-- INFO
+-- AUTHOR: VILLAFAÑE GONZALO FERNANDO
+-- CREATED: 07/07/2025
+-- UPDATED: 29/07/2025
+-- --------------------------------------------------------------------------------
+
+-- --------------------------------------------------------------------------------
+-- CONFIGURACIÓN DEL ARCHIVO
+-- --------------------------------------------------------------------------------
+config {
+  type: "assertion",
+  tags: ["validation"]
+}
+
+-- VALIDACIONES CRÍTICAS - CAMPOS PK Y OBLIGATORIOS
+
+-- ID_CLIENTE_UNICO nulo o vacío
+SELECT 'critical' AS assertion_type, 'ID_CLIENTE_UNICO' AS column_name, 
+CONCAT('CRÍTICO - Registro sin ID_CLIENTE_UNICO en fila con AST_NUMBER: ', COALESCE(AST_NUMBER, 'NULL')) AS error_message
+FROM ${ref("DATOS_SOCIOECONOMICOSTXT_TABLE")}
+WHERE ID_CLIENTE_UNICO IS NULL OR TRIM(ID_CLIENTE_UNICO) = ''
+
+UNION ALL
+
+-- AST_NUMBER nulo o vacío
+SELECT 'critical', 'AST_NUMBER', 
+CONCAT('CRÍTICO - Cliente: ', COALESCE(CAST(ID_CLIENTE_UNICO AS STRING), 'NULL'), ' tiene AST_NUMBER nulo o vacío')
+FROM ${ref("DATOS_SOCIOECONOMICOSTXT_TABLE")}
+WHERE AST_NUMBER IS NULL OR TRIM(AST_NUMBER) = ''
+
+UNION ALL
+
+-- ATC_RL_TYPE_CD nulo o vacío
+SELECT 'critical', 'ATC_RL_TYPE_CD', 
+CONCAT('CRÍTICO - Cliente: ', COALESCE(CAST(ID_CLIENTE_UNICO AS STRING), 'NULL'), ' - Teléfono: ', COALESCE(AST_NUMBER, 'NULL'), ' sin tipo de relación')
+FROM ${ref("DATOS_SOCIOECONOMICOSTXT_TABLE")}
+WHERE ATC_RL_TYPE_CD IS NULL OR TRIM(ATC_RL_TYPE_CD) = ''
+
+UNION ALL
+
+-- ATC_RL_TYPE_CD debe ser 'Afiliado'
+SELECT 'critical', 'ATC_RL_TYPE_CD_INVALIDO',
+CONCAT('CRÍTICO - Cliente: ', COALESCE(CAST(ID_CLIENTE_UNICO AS STRING), 'NULL'), ' - Teléfono: ', COALESCE(AST_NUMBER, 'NULL'), ' tiene tipo inválido: ', ATC_RL_TYPE_CD)
+FROM ${ref("DATOS_SOCIOECONOMICOSTXT_TABLE")}
+WHERE ATC_RL_TYPE_CD IS NOT NULL AND TRIM(ATC_RL_TYPE_CD) != '' AND ATC_RL_TYPE_CD != 'Afiliado'
+
+UNION ALL
+
+-- VALIDACIONES DE LONGITUD - AGRUPADAS POR EFICIENCIA
+
+-- Campos demográficos 
+SELECT 'dataLength', 'DEMOGRAFICOS_LONGITUD_EXCEDIDA',
+CONCAT('Longitud - Cliente: ', COALESCE(CAST(ID_CLIENTE_UNICO AS STRING), 'NULL'), ' - Campo demográfico excede límite permitido')
+FROM ${ref("DATOS_SOCIOECONOMICOSTXT_TABLE")}
+WHERE (
+  (GENERACION IS NOT NULL AND LENGTH(GENERACION) > 100) OR     
+  (GENERO IS NOT NULL AND LENGTH(GENERO) > 50) OR               
+  (ESTADO_CIVIL IS NOT NULL AND LENGTH(ESTADO_CIVIL) > 50)      
+)
+
+UNION ALL
+
+-- Campos socioeconómicos
+SELECT 'dataLength', 'SOCIOECONOMICO_LONGITUD_EXCEDIDA',
+CONCAT('Longitud - Cliente: ', COALESCE(CAST(ID_CLIENTE_UNICO AS STRING), 'NULL'), ' - Campo socioeconómico excede 250 caracteres')
+FROM ${ref("DATOS_SOCIOECONOMICOSTXT_TABLE")}
+WHERE (
+  (GRADO_INSTRUCCION IS NOT NULL AND LENGTH(GRADO_INSTRUCCION) > 250) OR
+  (OCUPACION IS NOT NULL AND LENGTH(OCUPACION) > 250) OR
+  (INGRESOMENSUAL IS NOT NULL AND LENGTH(INGRESOMENSUAL) > 250)
+)
