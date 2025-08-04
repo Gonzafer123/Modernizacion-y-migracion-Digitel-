@@ -1,295 +1,324 @@
-INSERT INTO SOPFUN.FCTRECARGA  --NOMBRE DE LA TABLA DATAWAREHOUSE
-SELECT AsignaIdFct.IDTIEMPO,
-AsignaIdFct.IDCANAL IDCANALRECARGA,
-AsignaIdFct.IDCOMERCIO,
-AsignaIdFct.IDDENOMINACION,
-AsignaIdFct.IDINSTITUCION,
-AsignaIdFct.IDTIPOCOMERCIO,
-AsignaIdFct.IDFORMADEPAGO,
-CASE WHEN substr(AsignaIdFct.gsm, 0, 4) IN ('0412','0422') THEN 1 ELSE 2 END AS
-IDTIPOTELEFONIA,
-AsignaIdFct.IDTIPOLOTERO,
-AsignaIdFct.IDTIPOTERCERO,
-Trim(AsignaIdFct.gsm) AS gsm,
-AsignaIdFct.HORA,
-AsignaIdFct.NRO_RECARGA,
-AsignaIdFct.MTO_RECARGA,
-AsignaIdFct.FECHA_CONC AS FECHACONC,
-AsignaIdFct.Aliado,
-CASE WHEN FACTOR.COMISION != '' THEN AsignaIdFct.MTO_RECARGA*
-FACTOR.COMISION ELSE 0 END AS COMISION,
-Trim(AsignaIdFct.ESTADOPREPAGO) AS ESTADOPREPAGO,
-to_char(sysdate,'YYYYMMDD') INSERTDATE,
-AsignaIdFct.REFERENCIA,
-CASE WHEN AsignaIdFct.IDDENOMINACION in (2000) THEN 12
-ELSE AsignaIdFct.IDSUBTIPOCOMERCIO END AS IDSUBTIPOCOMERCIO,
-AsignaIdFct.BANDERA,
-Trim(AsignaIdFct.TRACEID) AS TRACEID,
-Trim(AsignaIdFct.TERMINAL) AS TERMINAL,
-AsignaIdFct.MOTIVO,
-Trim(AsignaIdFct.ESTADOCONCILIACION) AS ESTADOCONCILIACION,
-AsignaIdFct.CODIGOVALIDACION,
-AsignaIdFct.USUARIOPREPAGO,
-Trim(AsignaIdFct.ORIGENPREPAGO) AS ORIGENPREPAGO,
-AsignaIdFct.MONTOINSTITUCION
+INSERT INTO SOPFUN.FCTRECARGA -- TABLA NO ENCONTRADA: SOPFUN.FCTRECARGA
+SELECT 
+  AsignaIdFct.IDTIEMPO,
+  AsignaIdFct.IDCANAL AS IDCANALRECARGA,
+  AsignaIdFct.IDCOMERCIO,
+  AsignaIdFct.IDDENOMINACION,
+  AsignaIdFct.IDINSTITUCION,
+  AsignaIdFct.IDTIPOCOMERCIO,
+  AsignaIdFct.IDFORMADEPAGO,
+  CASE 
+    WHEN SUBSTR(AsignaIdFct.gsm, 1, 4) IN ('0412','0422') THEN 1 
+    ELSE 2 
+  END AS IDTIPOTELEFONIA,
+  AsignaIdFct.IDTIPOLOTERO,
+  AsignaIdFct.IDTIPOTERCERO,
+  TRIM(AsignaIdFct.gsm) AS gsm,
+  AsignaIdFct.HORA,
+  AsignaIdFct.NRO_RECARGA,
+  AsignaIdFct.MTO_RECARGA,
+  AsignaIdFct.FECHA_CONC AS FECHACONC,
+  AsignaIdFct.Aliado,
+  CASE 
+    WHEN FACTOR.COMISION IS NOT NULL AND FACTOR.COMISION != '' THEN AsignaIdFct.MTO_RECARGA * FACTOR.COMISION 
+    ELSE 0 
+  END AS COMISION,
+  TRIM(AsignaIdFct.ESTADOPREPAGO) AS ESTADOPREPAGO,
+  FORMAT_DATE('%Y%m%d', CURRENT_DATE()) AS INSERTDATE,
+  AsignaIdFct.REFERENCIA,
+  CASE 
+    WHEN AsignaIdFct.IDDENOMINACION IN (2000) THEN 12
+    ELSE AsignaIdFct.IDSUBTIPOCOMERCIO 
+  END AS IDSUBTIPOCOMERCIO,
+  AsignaIdFct.BANDERA,
+  TRIM(AsignaIdFct.TRACEID) AS TRACEID,
+  TRIM(AsignaIdFct.TERMINAL) AS TERMINAL,
+  AsignaIdFct.MOTIVO,
+  TRIM(AsignaIdFct.ESTADOCONCILIACION) AS ESTADOCONCILIACION,
+  AsignaIdFct.CODIGOVALIDACION,
+  AsignaIdFct.USUARIOPREPAGO,
+  TRIM(AsignaIdFct.ORIGENPREPAGO) AS ORIGENPREPAGO,
+  AsignaIdFct.MONTOINSTITUCION
 FROM (
-SELECT AsignaMiembroTiempo.IDTIEMPO,
-CASE WHEN AsignaMiembroTiempo.IDCANAL is null THEN '99'
-ELSE AsignaMiembroTiempo.idCANAL END IDCANAL ,
-AsignaMiembroTiempo.idCOMERCIO,
-AsignaMiembroTiempo.idDENOMINACION,
-AsignaMiembroTiempo.idINSTITUCION,
-INST.IDTIPOCOMERCIO IDTIPOCOMERCIOINST,
-AsignaMiembroTiempo.IDTIPOCOMERCIO,
-AsignaMiembroTiempo.Nro_Recarga,
-AsignaMiembroTiempo.MTO_RECARGA,
-AsignaMiembroTiempo.FECHA_CONC,
-AsignaMiembroTiempo.IDFORMADEPAGO,
-AsignaMiembroTiempo.gsm,
-AsignaMiembroTiempo.HORA,
-AsignaMiembroTiempo.ESTADOPREPAGO,
-AsignaMiembroTiempo.IDTIPOLOTERO,
-CASE WHEN AsignaMiembroTiempo.IDTIPOCOMERCIO=9 THEN
-CASE WHEN AsignaMiembroTiempo.IDDENOMINACION in (2000) THEN 1
-ELSE
-CASE WHEN INST.IDTIPOTERCERO is null THEN 3 ELSE
-TO_NUMBER(NVL(INST.IDTIPOTERCERO,0)) END
-END
-ELSE 3 END IDTIPOTERCERO,
-AsignaMiembroTiempo.REFERENCIA,
-AsignaMiembroTiempo.Aliado,
-AsignaMiembroTiempo.IDSUBTIPOCOMERCIO,
-AsignaMiembroTiempo.BANDERA,
-AsignaMiembroTiempo.TRACEID,
-AsignaMiembroTiempo.TERMINAL,
-AsignaMiembroTiempo.MOTIVO,
-AsignaMiembroTiempo.ESTADOCONCILIACION,
-AsignaMiembroTiempo.CODIGOVALIDACION,
-AsignaMiembroTiempo.USUARIOPREPAGO,
-AsignaMiembroTiempo.ORIGENPREPAGO,
-AsignaMiembroTiempo.MONTOINSTITUCION
-FROM (
-SELECT DISTINCT estructuraDMPrepago.INSTITUCION IDINSTITUCION,
-CASE WHEN estructuraDMPrepago.IDCOMERCIO_1='9999999999' THEN
-estructuraDMPrepago.IDCOMERCIO_1 ELSE estructuraDMPrepago.IDCOMERCIO
-END IDCOMERCIO,
-CASE WHEN estructuraDMPrepago.IDCOMERCIO_1='9999999999' THEN
-lpad(ltrim(estructuraDMPrepago.IDCOMERCIO,10),10,'0')ELSE '' END REFERENCIA,
-estructuraDMPrepago.CANAL IDCANAL,
-estructuraDMPrepago.TELEFONO gsm,
-estructuraDMPrepago.FORMADEPAGO IDFORMADEPAGO,
-estructuraDMPrepago.DENOMINACION IDDENOMINACION,
-estructuraDMPrepago.MTO_RECARGA,
-estructuraDMPrepago.FECHA_CONC,
-DIMTIEMPO.IDTIEMPO,
-estructuraDMPrepago.HORA,
-estructuraDMPrepago.IDTIPOCOMERCIO,
-estructuraDMPrepago.ESTADOPREPAGO,
-CASE WHEN estructuraDMPrepago.IDTIPOLOTERO IS NULL THEN 9 ELSE
-estructuraDMPrepago.IDTIPOLOTERO END IDTIPOLOTERO,
-estructuraDMPrepago.Nro_Recarga,
-estructuraDMPrepago.Aliado,
-estructuraDMPrepago.IDSUBTIPOCOMERCIO,
-estructuraDMPrepago.BANDERA,
-estructuraDMPrepago.TRACEID,
-estructuraDMPrepago.TERMINAL,
-estructuraDMPrepago.MOTIVO,
-estructuraDMPrepago.ESTADOCONCILIACION,
-estructuraDMPrepago.CODIGOVALIDACION,
-estructuraDMPrepago.USUARIOPREPAGO,
-estructuraDMPrepago.ORIGENPREPAGO,
-estructuraDMPrepago.MONTOINSTITUCION
-FROM (
-SELECT DISTINCT ValidaGSMExcluidos.INSTITUCION,
-ValidaGSMExcluidos.COMERCIO IDCOMERCIO,
-ValidaGSMExcluidos.CANAL,
-ValidaGSMExcluidos.TELEFONO,
-CASE WHEN ValidaGSMExcluidos.FORMADEPAGO =' ' or
-ValidaGSMExcluidos.FORMADEPAGO is null THEN 'NA' ELSE
-ValidaGSMExcluidos.FORMADEPAGO END FORMADEPAGO,
-ValidaGSMExcluidos.DENOMINACION,
-SUM(ValidaGSMExcluidos.mto_recarga) mto_recarga,
-ValidaGSMExcluidos.FECHA,
-ValidaGSMExcluidos.FECHA_CONC,
-ValidaGSMExcluidos.HORA,
-ValidaGSMExcluidos.IDTIPOCOMERCIO,
-ValidaGSMExcluidos.ESTADOPREPAGO,
-NVL(ValidaGSMExcluidos.COMERCIO,'9999999999') IDCOMERCIO_1,
-DIMCOMERCIO.IDTIPOLOTERO,
-ValidaGSMExcluidos.Aliado,
-sum(ValidaGSMExcluidos.Nro_Recarga) Nro_Recarga,
-ValidaGSMExcluidos.IDSUBTIPOCOMERCIO,
-ValidaGSMExcluidos.BANDERA,
-ValidaGSMExcluidos.TRACEID,
-ValidaGSMExcluidos.TERMINAL,
-ValidaGSMExcluidos.MOTIVO,
-ValidaGSMExcluidos.ESTADOCONCILIACION,
-ValidaGSMExcluidos.CODIGOVALIDACION,
-ValidaGSMExcluidos.USUARIOPREPAGO,
-ValidaGSMExcluidos.ORIGENPREPAGO,
-ValidaGSMExcluidos.MONTOINSTITUCION
-FROM (
-SELECT ValidaFormaPago.INSTITUCION,
-ValidaFormaPago.FECHA,
-ValidaFormaPago.HORA,
-ValidaFormaPago.TELEFONO,
-ValidaFormaPago.COMERCIO,
-ValidaFormaPago.DENOMINACION,
-ValidaFormaPago.FORMADEPAGO,
-ValidaFormaPago.ESTADOPREPAGO,
-ValidaFormaPago.CANAL,
-ValidaFormaPago.CEDULA,
-max(ValidaFormaPago.FECHA_CONC) FECHA_CONC,
-ValidaFormaPago.Aliado,
-sum(ValidaFormaPago.DENOMINACION) mto_recarga ,
-count(*) Nro_Recarga,
-ValidaFormaPago.IDTIPOCOMERCIO,
-ValidaFormaPago.IDSUBTIPOCOMERCIO,
-ValidaFormaPago.BANDERA,
-ValidaFormaPago.TRACEID,
-ValidaFormaPago.TERMINAL,
-ValidaFormaPago.MOTIVO,
-ValidaFormaPago.ESTADOCONCILIACION,
-ValidaFormaPago.CODIGOVALIDACION,
-ValidaFormaPago.USUARIOPREPAGO,
-ValidaFormaPago.ORIGENPREPAGO,
-ValidaFormaPago.MONTOINSTITUCION
-FROM (
-SELECT SQL.INSTITUCION,
-SQL.FECHA,
-SQL.HORA,
-SQL.TELEFONO,
-SQL.COMERCIO,
-SQL.DENOMINACION,
-SQL.FORMADEPAGO,
-SQL.ESTADOPREPAGO,
-SQL.CANAL,
-SQL.CEDULA,
-SQL.CO_IVA,
-SQL.FECHA_CONC,
-SQL.MOTIVO,
-SQL.ALIADO,
-SQL.IDTIPOCOMERCIO,
-SQL.IDSUBTIPOCOMERCIO,
-SQL.BANDERA,
-SQL.TRACEID,
-SQL.TERMINAL,
-SQL.ESTADOCONCILIACION,
-SQL.CODIGOVALIDACION,
-SQL.USUARIOPREPAGO,
-SQL.ORIGENPREPAGO,
-SQL.MONTOINSTITUCION
-FROM (
-SELECT A.*,
-(SELECT count(*)
-FROM gsmaliado b
-WHERE CAST(replace(UPPER(telefono),'O',0) AS integer)>=
-b.gsm_desde
-AND CAST(replace(UPPER(telefono),'O',0) AS integer)<= b.gsm_hasta)
-Aliado,
-TIPO.IDTIPOCOMERCIO,
-SUBTIPO.IDSUBTIPOCOMERCIO
-FROM ${CONF_NAME_SCHEMA_OP}.PTF_PREPAGOS A,
-(SELECT E.codigo, E.descripcion, E.tipo, E.co_institucion,
-D.IDSUBTIPOCOMERCIO
-FROM ${CONF_NAME_SCHEMA_OP}.comercios E,
-DIMSUBTIPOCOMERCIO D
-WHERE E.CO_INSTITUCION='001'
-AND Trim(Upper(E.TIPO))=Trim(Upper(D.DESCRIPCION(+)))
-UNION
-SELECT DISTINCT
-A.COMERCIO,
-NULL,
-'Terceros',
-'001',
-11
-FROM ${CONF_NAME_SCHEMA_OP}.PTF_PREPAGOS A
-WHERE A.INSTITUCION='001'
-AND A. FECHA BETWEEN '${PFECHA2}' AND '${PFECHA1}'
-AND 0 = (SELECT Count(1) FROM
-${CONF_NAME_SCHEMA_OP}.comercios WHERE codigo = A.comercio )
-) SUBTIPO,
-(SELECT DTC.IDTIPOCOMERCIO,DTI.IDINSTITUCION
-FROM DIMTIPOCOMERCIO DTC,
-DIMINSTITUCION DTI
-WHERE
-TRIM(UPPER(DTC.DESCRIPCION(+)))=TRIM(UPPER(DTI.IDTIPOCOME
-RCIO))) TIPO
-WHERE A.FECHA BETWEEN '${PFECHA2}' AND '${PFECHA1}'
-AND A.INSTITUCION=SUBTIPO.co_institucion(+)
-AND A.COMERCIO=SUBTIPO.CODIGO(+)
-AND A.institucion=TIPO.IDINSTITUCION(+)
-AND A.DENOMINACION IN (SELECT IDDENOMINACION FROM
-DIMDENOMINACION)
-AND TRIM (A.ESTADOPREPAGO)
-IN ('PREPAGOACEPTADO','PROCESODEPREPAGO','PROCESODEREINYECCION','PRO
-CESOENREINYECCION',
-'VALIDACIONRECHAZADA2','VALIDACIONRECHAZADA','PREPAGOANULADO','VALIDAC
-IONACEPTADA')
-) SQL
-) ValidaFormaPago LEFT OUTER JOIN CATDW.CATDW_GSM_EXCLUIDO
-CATDW_GSM_EXCLUIDO ON
-ValidaFormaPago.TELEFONO=CATDW_GSM_EXCLUIDO.GSM
-AND CATDW_GSM_EXCLUIDO.GSM IS null
-GROUP BY
-ValidaFormaPago.INSTITUCION,
-ValidaFormaPago.TELEFONO,
-ValidaFormaPago.COMERCIO,
-ValidaFormaPago.DENOMINACION,
-ValidaFormaPago.FORMADEPAGO,
-ValidaFormaPago.ESTADOPREPAGO,
-ValidaFormaPago.CANAL,
-ValidaFormaPago.CEDULA,
-ValidaFormaPago.FECHA,
-ValidaFormaPago.HORA,
-ValidaFormaPago.Aliado,
-ValidaFormaPago.IDTIPOCOMERCIO,
-ValidaFormaPago.IDSUBTIPOCOMERCIO,
-ValidaFormaPago.BANDERA,
-ValidaFormaPago.TRACEID,
-ValidaFormaPago.TERMINAL,
-ValidaFormaPago.MOTIVO,
-ValidaFormaPago.ESTADOCONCILIACION,
-ValidaFormaPago.CODIGOVALIDACION,
-ValidaFormaPago.USUARIOPREPAGO,
-ValidaFormaPago.ORIGENPREPAGO,
-ValidaFormaPago.MONTOINSTITUCION ) ValidaGSMExcluidos LEFT
-OUTER JOIN DIMCOMERCIO ON ValidaGSMExcluidos.COMERCIO =
-DIMCOMERCIO.IDCOMERCIO
-AND
-ValidaGSMExcluidos.INSTITUCION=DIMCOMERCIO.CO_INSTITUCION
-AND ValidaGSMExcluidos.IDTIPOCOMERCIO =
-DIMCOMERCIO.IDTIPOCOMERCIO
-GROUP BY
-ValidaGSMExcluidos.INSTITUCION,
-ValidaGSMExcluidos.COMERCIO,
-ValidaGSMExcluidos.CANAL,
-ValidaGSMExcluidos.TELEFONO,
-ValidaGSMExcluidos.FORMADEPAGO,
-ValidaGSMExcluidos.DENOMINACION,
-ValidaGSMExcluidos.FECHA,
-ValidaGSMExcluidos.FECHA_CONC,
-ValidaGSMExcluidos.HORA,
-DIMCOMERCIO.IDTIPOCOMERCIO,
-ValidaGSMExcluidos.ESTADOPREPAGO,
-DIMCOMERCIO.IDCOMERCIO,
-DIMCOMERCIO.IDTIPOLOTERO,
-ValidaGSMExcluidos.Aliado,
-ValidaGSMExcluidos.IDTIPOCOMERCIO,
-ValidaGSMExcluidos.IDSUBTIPOCOMERCIO,
-ValidaGSMExcluidos.BANDERA,
-ValidaGSMExcluidos.TRACEID,
-ValidaGSMExcluidos.TERMINAL,
-ValidaGSMExcluidos.MOTIVO,
-ValidaGSMExcluidos.ESTADOCONCILIACION,
-ValidaGSMExcluidos.CODIGOVALIDACION,
-ValidaGSMExcluidos.USUARIOPREPAGO,
-ValidaGSMExcluidos.ORIGENPREPAGO,
-ValidaGSMExcluidos.MONTOINSTITUCION
-) estructuraDMPrepago, DIMTIEMPO
-WHERE DIMTIEMPO.FECHA=estructuraDMPrepago.FECHA
-) AsignaMiembroTiempo LEFT OUTER JOIN DIMINSTITUCION INST ON
-INST.IDINSTITUCION = AsignaMiembroTiempo.idINSTITUCION
-) AsignaIdFct LEFT OUTER JOIN FACTORCOMISION FACTOR ON
-FACTOR.IDFORMAPAGO = AsignaIdFct.IDFORMADEPAGO;
-COMMIT;
+  SELECT 
+    AsignaMiembroTiempo.IDTIEMPO,
+    CASE 
+      WHEN AsignaMiembroTiempo.IDCANAL IS NULL THEN '99'
+      ELSE AsignaMiembroTiempo.IDCANAL 
+    END AS IDCANAL,
+    AsignaMiembroTiempo.IDCOMERCIO,
+    AsignaMiembroTiempo.IDDENOMINACION,
+    AsignaMiembroTiempo.IDINSTITUCION,
+    INST.IDTIPOCOMERCIO AS IDTIPOCOMERCIOINST,
+    AsignaMiembroTiempo.IDTIPOCOMERCIO,
+    AsignaMiembroTiempo.Nro_Recarga,
+    AsignaMiembroTiempo.MTO_RECARGA,
+    AsignaMiembroTiempo.FECHA_CONC,
+    AsignaMiembroTiempo.IDFORMADEPAGO,
+    AsignaMiembroTiempo.gsm,
+    AsignaMiembroTiempo.HORA,
+    AsignaMiembroTiempo.ESTADOPREPAGO,
+    AsignaMiembroTiempo.IDTIPOLOTERO,
+    CASE 
+      WHEN AsignaMiembroTiempo.IDTIPOCOMERCIO = 9 THEN
+        CASE 
+          WHEN AsignaMiembroTiempo.IDDENOMINACION IN (2000) THEN 1
+          ELSE
+            CASE 
+              WHEN INST.IDTIPOTERCERO IS NULL THEN 3 
+              ELSE CAST(COALESCE(INST.IDTIPOTERCERO, 0) AS INT64)
+            END
+        END
+      ELSE 3 
+    END AS IDTIPOTERCERO,
+    AsignaMiembroTiempo.REFERENCIA,
+    AsignaMiembroTiempo.Aliado,
+    AsignaMiembroTiempo.IDSUBTIPOCOMERCIO,
+    AsignaMiembroTiempo.BANDERA,
+    AsignaMiembroTiempo.TRACEID,
+    AsignaMiembroTiempo.TERMINAL,
+    AsignaMiembroTiempo.MOTIVO,
+    AsignaMiembroTiempo.ESTADOCONCILIACION,
+    AsignaMiembroTiempo.CODIGOVALIDACION,
+    AsignaMiembroTiempo.USUARIOPREPAGO,
+    AsignaMiembroTiempo.ORIGENPREPAGO,
+    AsignaMiembroTiempo.MONTOINSTITUCION
+  FROM (
+    SELECT DISTINCT 
+      estructuraDMPrepago.INSTITUCION AS IDINSTITUCION,
+      CASE 
+        WHEN estructuraDMPrepago.IDCOMERCIO_1 = '9999999999' THEN estructuraDMPrepago.IDCOMERCIO_1 
+        ELSE estructuraDMPrepago.IDCOMERCIO
+      END AS IDCOMERCIO,
+      CASE 
+        WHEN estructuraDMPrepago.IDCOMERCIO_1 = '9999999999' THEN 
+          LPAD(LTRIM(estructuraDMPrepago.IDCOMERCIO, '10'), 10, '0')
+        ELSE '' 
+      END AS REFERENCIA,
+      estructuraDMPrepago.CANAL AS IDCANAL,
+      estructuraDMPrepago.TELEFONO AS gsm,
+      estructuraDMPrepago.FORMADEPAGO AS IDFORMADEPAGO,
+      estructuraDMPrepago.DENOMINACION AS IDDENOMINACION,
+      estructuraDMPrepago.MTO_RECARGA,
+      estructuraDMPrepago.FECHA_CONC,
+      DIMTIEMPO.IDTIEMPO,
+      estructuraDMPrepago.HORA,
+      estructuraDMPrepago.IDTIPOCOMERCIO,
+      estructuraDMPrepago.ESTADOPREPAGO,
+      CASE 
+        WHEN estructuraDMPrepago.IDTIPOLOTERO IS NULL THEN 9 
+        ELSE estructuraDMPrepago.IDTIPOLOTERO 
+      END AS IDTIPOLOTERO,
+      estructuraDMPrepago.Nro_Recarga,
+      estructuraDMPrepago.Aliado,
+      estructuraDMPrepago.IDSUBTIPOCOMERCIO,
+      estructuraDMPrepago.BANDERA,
+      estructuraDMPrepago.TRACEID,
+      estructuraDMPrepago.TERMINAL,
+      estructuraDMPrepago.MOTIVO,
+      estructuraDMPrepago.ESTADOCONCILIACION,
+      estructuraDMPrepago.CODIGOVALIDACION,
+      estructuraDMPrepago.USUARIOPREPAGO,
+      estructuraDMPrepago.ORIGENPREPAGO,
+      estructuraDMPrepago.MONTOINSTITUCION
+    FROM (
+      SELECT DISTINCT 
+        ValidaGSMExcluidos.INSTITUCION,
+        ValidaGSMExcluidos.COMERCIO AS IDCOMERCIO,
+        ValidaGSMExcluidos.CANAL,
+        ValidaGSMExcluidos.TELEFONO,
+        CASE 
+          WHEN ValidaGSMExcluidos.FORMADEPAGO = ' ' OR ValidaGSMExcluidos.FORMADEPAGO IS NULL THEN 'NA' 
+          ELSE ValidaGSMExcluidos.FORMADEPAGO 
+        END AS FORMADEPAGO,
+        ValidaGSMExcluidos.DENOMINACION,
+        SUM(ValidaGSMExcluidos.mto_recarga) AS mto_recarga,
+        ValidaGSMExcluidos.FECHA,
+        ValidaGSMExcluidos.FECHA_CONC,
+        ValidaGSMExcluidos.HORA,
+        ValidaGSMExcluidos.IDTIPOCOMERCIO,
+        ValidaGSMExcluidos.ESTADOPREPAGO,
+        COALESCE(ValidaGSMExcluidos.COMERCIO, '9999999999') AS IDCOMERCIO_1,
+        DIMCOMERCIO.IDTIPOLOTERO,
+        ValidaGSMExcluidos.Aliado,
+        SUM(ValidaGSMExcluidos.Nro_Recarga) AS Nro_Recarga,
+        ValidaGSMExcluidos.IDSUBTIPOCOMERCIO,
+        ValidaGSMExcluidos.BANDERA,
+        ValidaGSMExcluidos.TRACEID,
+        ValidaGSMExcluidos.TERMINAL,
+        ValidaGSMExcluidos.MOTIVO,
+        ValidaGSMExcluidos.ESTADOCONCILIACION,
+        ValidaGSMExcluidos.CODIGOVALIDACION,
+        ValidaGSMExcluidos.USUARIOPREPAGO,
+        ValidaGSMExcluidos.ORIGENPREPAGO,
+        ValidaGSMExcluidos.MONTOINSTITUCION
+      FROM (
+        SELECT 
+          ValidaFormaPago.INSTITUCION,
+          ValidaFormaPago.FECHA,
+          ValidaFormaPago.HORA,
+          ValidaFormaPago.TELEFONO,
+          ValidaFormaPago.COMERCIO,
+          ValidaFormaPago.DENOMINACION,
+          ValidaFormaPago.FORMADEPAGO,
+          ValidaFormaPago.ESTADOPREPAGO,
+          ValidaFormaPago.CANAL,
+          ValidaFormaPago.CEDULA,
+          MAX(ValidaFormaPago.FECHA_CONC) AS FECHA_CONC,
+          ValidaFormaPago.Aliado,
+          SUM(ValidaFormaPago.DENOMINACION) AS mto_recarga,
+          COUNT(*) AS Nro_Recarga,
+          ValidaFormaPago.IDTIPOCOMERCIO,
+          ValidaFormaPago.IDSUBTIPOCOMERCIO,
+          ValidaFormaPago.BANDERA,
+          ValidaFormaPago.TRACEID,
+          ValidaFormaPago.TERMINAL,
+          ValidaFormaPago.MOTIVO,
+          ValidaFormaPago.ESTADOCONCILIACION,
+          ValidaFormaPago.CODIGOVALIDACION,
+          ValidaFormaPago.USUARIOPREPAGO,
+          ValidaFormaPago.ORIGENPREPAGO,
+          ValidaFormaPago.MONTOINSTITUCION
+        FROM (
+          SELECT 
+            SQL.INSTITUCION,
+            SQL.FECHA,
+            SQL.HORA,
+            SQL.TELEFONO,
+            SQL.COMERCIO,
+            SQL.DENOMINACION,
+            SQL.FORMADEPAGO,
+            SQL.ESTADOPREPAGO,
+            SQL.CANAL,
+            SQL.CEDULA,
+            SQL.CO_IVA,
+            SQL.FECHA_CONC,
+            SQL.MOTIVO,
+            SQL.ALIADO,
+            SQL.IDTIPOCOMERCIO,
+            SQL.IDSUBTIPOCOMERCIO,
+            SQL.BANDERA,
+            SQL.TRACEID,
+            SQL.TERMINAL,
+            SQL.ESTADOCONCILIACION,
+            SQL.CODIGOVALIDACION,
+            SQL.USUARIOPREPAGO,
+            SQL.ORIGENPREPAGO,
+            SQL.MONTOINSTITUCION
+          FROM (
+            SELECT 
+              A.*,
+              (SELECT COUNT(*)
+               FROM `etl-service-proj.HBDB_PROD_Zona_Cruda.RECVIRTNEW_COMERCIO` b
+               WHERE CAST(REPLACE(UPPER(telefono), 'O', '0') AS INT64) >= b.gsm_desde
+                 AND CAST(REPLACE(UPPER(telefono), 'O', '0') AS INT64) <= b.gsm_hasta) AS Aliado,
+              TIPO.IDTIPOCOMERCIO,
+              SUBTIPO.IDSUBTIPOCOMERCIO
+              FROM `${CONF_NAME_SCHEMA_OP}.PTF_PREPAGOS` A
+            LEFT JOIN (
+              SELECT 
+                E.codigo, 
+                E.descripcion, 
+                E.tipo, 
+                E.co_institucion,
+                D.IDSUBTIPOCOMERCIO
+              FROM `${CONF_NAME_SCHEMA_OP}.comercios` E
+              LEFT JOIN DIMSUBTIPOCOMERCIO D ON TRIM(UPPER(E.TIPO)) = TRIM(UPPER(D.DESCRIPCION)) -- TABLA NO ENCONTRADA: DIMSUBTIPOCOMERCIO
+              WHERE E.CO_INSTITUCION = '001'
+              
+              UNION ALL
+              
+              SELECT DISTINCT
+                A.COMERCIO,
+                NULL,
+                'Terceros',
+                '001',
+                11
+              FROM `${CONF_NAME_SCHEMA_OP}.PTF_PREPAGOS` A
+              WHERE A.INSTITUCION = '001'
+                AND A.FECHA BETWEEN '${PFECHA2}' AND '${PFECHA1}'
+                AND (SELECT COUNT(1) FROM `${CONF_NAME_SCHEMA_OP}.comercios` WHERE codigo = A.comercio) = 0
+            ) SUBTIPO ON A.INSTITUCION = SUBTIPO.co_institucion AND A.COMERCIO = SUBTIPO.CODIGO
+            LEFT JOIN (
+              SELECT 
+                DTC.IDTIPOCOMERCIO,
+                DTI.IDINSTITUCION
+              FROM DIMTIPOCOMERCIO DTC -- TABLA NO ENCONTRADA: DIMTIPOCOMERCIO
+              LEFT JOIN DIMINSTITUCION DTI ON TRIM(UPPER(DTC.DESCRIPCION)) = TRIM(UPPER(DTI.IDTIPOCOMERCIO)) -- TABLA NO ENCONTRADA: DIMINSTITUCION
+            ) TIPO ON A.institucion = TIPO.IDINSTITUCION
+            WHERE A.FECHA BETWEEN '${PFECHA2}' AND '${PFECHA1}'
+              AND A.DENOMINACION IN (SELECT IDDENOMINACION FROM DIMDENOMINACION) -- TABLA NO ENCONTRADA: DIMDENOMINACION
+              AND TRIM(A.ESTADOPREPAGO) IN (
+                'PREPAGOACEPTADO',
+                'PROCESODEPREPAGO',
+                'PROCESODEREINYECCION',
+                'PROCESOENREINYECCION',
+                'VALIDACIONRECHAZADA2',
+                'VALIDACIONRECHAZADA',
+                'PREPAGOANULADO',
+                'VALIDACIONACEPTADA'
+              )
+          ) SQL
+        ) ValidaFormaPago 
+        LEFT JOIN CATDW.CATDW_GSM_EXCLUIDO ON ValidaFormaPago.TELEFONO = CATDW_GSM_EXCLUIDO.GSM -- TABLA NO ENCONTRADA: CATDW.CATDW_GSM_EXCLUIDO
+        WHERE CATDW_GSM_EXCLUIDO.GSM IS NULL
+        GROUP BY
+          ValidaFormaPago.INSTITUCION,
+          ValidaFormaPago.TELEFONO,
+          ValidaFormaPago.COMERCIO,
+          ValidaFormaPago.DENOMINACION,
+          ValidaFormaPago.FORMADEPAGO,
+          ValidaFormaPago.ESTADOPREPAGO,
+          ValidaFormaPago.CANAL,
+          ValidaFormaPago.CEDULA,
+          ValidaFormaPago.FECHA,
+          ValidaFormaPago.HORA,
+          ValidaFormaPago.Aliado,
+          ValidaFormaPago.IDTIPOCOMERCIO,
+          ValidaFormaPago.IDSUBTIPOCOMERCIO,
+          ValidaFormaPago.BANDERA,
+          ValidaFormaPago.TRACEID,
+          ValidaFormaPago.TERMINAL,
+          ValidaFormaPago.MOTIVO,
+          ValidaFormaPago.ESTADOCONCILIACION,
+          ValidaFormaPago.CODIGOVALIDACION,
+          ValidaFormaPago.USUARIOPREPAGO,
+          ValidaFormaPago.ORIGENPREPAGO,
+          ValidaFormaPago.MONTOINSTITUCION
+      ) ValidaGSMExcluidos 
+      LEFT JOIN `etl-service-proj.HBDB_PROD_Zona_Cruda.RECVIRTNEW_COMERCIO` DIMCOMERCIO ON ValidaGSMExcluidos.COMERCIO = DIMCOMERCIO.IDCOMERCIO
+        AND ValidaGSMExcluidos.INSTITUCION = DIMCOMERCIO.CO_INSTITUCION
+        AND ValidaGSMExcluidos.IDTIPOCOMERCIO = DIMCOMERCIO.IDTIPOCOMERCIO
+      GROUP BY
+        ValidaGSMExcluidos.INSTITUCION,
+        ValidaGSMExcluidos.COMERCIO,
+        ValidaGSMExcluidos.CANAL,
+        ValidaGSMExcluidos.TELEFONO,
+        ValidaGSMExcluidos.FORMADEPAGO,
+        ValidaGSMExcluidos.DENOMINACION,
+        ValidaGSMExcluidos.FECHA,
+        ValidaGSMExcluidos.FECHA_CONC,
+        ValidaGSMExcluidos.HORA,
+        DIMCOMERCIO.IDTIPOCOMERCIO,
+        ValidaGSMExcluidos.ESTADOPREPAGO,
+        DIMCOMERCIO.IDCOMERCIO,
+        DIMCOMERCIO.IDTIPOLOTERO,
+        ValidaGSMExcluidos.Aliado,
+        ValidaGSMExcluidos.IDTIPOCOMERCIO,
+        ValidaGSMExcluidos.IDSUBTIPOCOMERCIO,
+        ValidaGSMExcluidos.BANDERA,
+        ValidaGSMExcluidos.TRACEID,
+        ValidaGSMExcluidos.TERMINAL,
+        ValidaGSMExcluidos.MOTIVO,
+        ValidaGSMExcluidos.ESTADOCONCILIACION,
+        ValidaGSMExcluidos.CODIGOVALIDACION,
+        ValidaGSMExcluidos.USUARIOPREPAGO,
+        ValidaGSMExcluidos.ORIGENPREPAGO,
+        ValidaGSMExcluidos.MONTOINSTITUCION
+    ) estructuraDMPrepago
+    CROSS JOIN DIMTIEMPO -- TABLA NO ENCONTRADA: DIMTIEMPO
+    WHERE DIMTIEMPO.FECHA = estructuraDMPrepago.FECHA
+  ) AsignaMiembroTiempo 
+  LEFT JOIN DIMINSTITUCION INST ON INST.IDINSTITUCION = AsignaMiembroTiempo.IDINSTITUCION -- TABLA NO ENCONTRADA: DIMINSTITUCION
+) AsignaIdFct 
+LEFT JOIN FACTORCOMISION FACTOR ON FACTOR.IDFORMAPAGO = AsignaIdFct.IDFORMADEPAGO; -- TABLA NO ENCONTRADA: FACTORCOMISION
