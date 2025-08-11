@@ -1,0 +1,337 @@
+  -- --------------------------------------------------------------------------------
+  -- INFO
+  -- AUTHOR: LEANDRO MAZZARELLI
+  -- CREATED: 04/07/2025
+  -- UPDATED: 05/08/2025
+  -- --------------------------------------------------------------------------------
+
+config {
+    type: "table",
+    schema: "SILVER",
+    name: "DATOS_LINEA_PREPAGO_TABLE",
+    description: "Tabla de unificación de datos lineas de afiliados",
+    tags: ["materialization"]
+}
+-------------------------------------------------------------------------------------
+
+WITH
+  params AS 
+(
+  SELECT DATE("${require("includes/variables").get_cal_date()}") AS CAL_DATE    
+),
+  CANALES AS (
+  SELECT
+    '58'||SUBSTR(c.component_value,2) MSISDN,
+    UPPER(b.display_value) TIPO_ACTIVACION,
+    d.channel TIPO_CANAL,
+    INITCAP(e.display_value) NOMBRE_CANAL
+  FROM
+    etl-service-proj.BDUC_PROD_Zona_Cruda.CRM360_IC_ORDER a
+  LEFT OUTER JOIN
+    etl-service-proj.BDUC_PROD_Zona_Cruda.CRM360_IC_ORDER_TYPES b
+  ON
+    b.id_order_type=a.id_order_type
+  LEFT OUTER JOIN
+    etl-service-proj.BDUC_PROD_Zona_Cruda.CRM360_IC_ORDER_ITEMS c
+  ON
+    c.id_order = a.id_order
+    AND id_component='INV-001'
+  LEFT OUTER JOIN
+    etl-service-proj.BDUC_PROD_Zona_Cruda.CRM360_IC_USER d
+  ON
+    UPPER(d.username)= UPPER(a.created_who)
+  LEFT OUTER JOIN
+    etl-service-proj.BDUC_PROD_Zona_Cruda.CRM360_IC_USER_LOCALITY e
+  ON
+    CAST(e.id_locality AS STRING) = CAST(SUBSTR(d.location,1,10)AS STRING)
+
+  CROSS JOIN params
+  WHERE
+
+    DATE(a.created_dt) BETWEEN DATE_SUB(DATE_TRUNC(params.CAL_DATE, MONTH), INTERVAL 1 MONTH)
+                          AND DATE_SUB(DATE_TRUNC(params.CAL_DATE, MONTH), INTERVAL 1 DAY)
+    AND a.id_order_type IN ('OT-001',
+      'OT-007',
+      'OT-008',
+      'OT-009',
+      'OT-010',
+      'OT-016',
+      'OT-026',
+      'OT-027',
+      'OT-040',
+      'OT-034') ),
+  FEINS_LINEA_P AS (
+  SELECT
+    a.ast_number msisdn,
+    a.ast_install_dt fecha_install_linea
+  FROM
+    etl-service-proj.BDUC_PROD_Zona_Cruda.BDUC_U_ASSET_UP2DT_VIEW a),
+  CNTT_P AS (
+  SELECT
+    a.ast_number msisdn,
+    COUNT(DISTINCT b.customer_id) cant_titulares
+  FROM
+    etl-service-proj.BDUC_PROD_Zona_Cruda.BDUC_U_ASSET_UP2DT_VIEW a
+  INNER JOIN
+    etl-service-proj.BDUC_PROD_Zona_Cruda.BDUC_U_ASSET_CUSTOMER_UP2DT_VIEW b
+  ON
+    b.asset_id = a.asset_id
+  GROUP BY
+    a.ast_number),
+  ESTATUS AS (
+  SELECT
+    account_name msisdn,
+    lc_state,
+    lc_sub_state_code_id,
+    lc_reason_code_id,
+    'Servicio Activo' ESTATUS
+  FROM
+    etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_ACCOUNT_TBL_UP2DT_VIEW
+  WHERE
+    account_type = 'SUB'
+    AND lc_state = 'ACT'
+  UNION ALL
+  SELECT
+    account_name msisdn,
+    lc_state,
+    lc_sub_state_code_id,
+    lc_reason_code_id,
+    'Suspensión Robo y Extravío' ESTATUS
+  FROM
+    etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_ACCOUNT_TBL_UP2DT_VIEW
+  WHERE
+    account_type = 'SUB'
+    AND lc_state = 'PAS'
+    AND lc_sub_state_code_id = 'LOST'
+  UNION ALL
+  SELECT
+    account_name msisdn,
+    lc_state,
+    lc_sub_state_code_id,
+    lc_reason_code_id,
+    'Suspensión Temporal' ESTATUS
+  FROM
+    etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_ACCOUNT_TBL_UP2DT_VIEW
+  WHERE
+    account_type = 'SUB'
+    AND lc_state = 'PAS'
+    AND lc_sub_state_code_id = 'TEMP'
+  UNION ALL
+  SELECT
+    account_name msisdn,
+    lc_state,
+    lc_sub_state_code_id,
+    lc_reason_code_id,
+    'Suspensión 367 Días Sin Recarga' ESTATUS
+  FROM
+    etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_ACCOUNT_TBL_UP2DT_VIEW
+  WHERE
+    account_type = 'SUB'
+    AND lc_state = 'PAS'
+    AND lc_sub_state_code_id = 'SIL'
+  UNION ALL
+  SELECT
+    account_name msisdn,
+    lc_state,
+    lc_sub_state_code_id,
+    lc_reason_code_id,
+    'Suspensión Por Fraud' ESTATUS
+  FROM
+    etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_ACCOUNT_TBL_UP2DT_VIEW
+  WHERE
+    account_type = 'SUB'
+    AND lc_state = 'PAS'
+    AND lc_sub_state_code_id = 'FRAUD'
+  UNION ALL
+  SELECT
+    account_name msisdn,
+    lc_state,
+    lc_sub_state_code_id,
+    lc_reason_code_id,
+    'Suspensión Sin Saldo' ESTATUS
+  FROM
+    etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_ACCOUNT_TBL_UP2DT_VIEW
+  WHERE
+    account_type = 'SUB'
+    AND lc_state = 'PAS'
+    AND lc_reason_code_id = 'COVRA'
+  UNION ALL
+  SELECT
+    account_name msisdn,
+    lc_state,
+    lc_sub_state_code_id,
+    lc_reason_code_id,
+    'Suspensión Expiración' ESTATUS
+  FROM
+    etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_ACCOUNT_TBL_UP2DT_VIEW
+  WHERE
+    account_type = 'SUB'
+    AND lc_state = 'PAS'
+    AND lc_reason_code_id = 'EXPIREDA'
+  UNION ALL
+  SELECT
+    account_name msisdn,
+    lc_state,
+    lc_sub_state_code_id,
+    lc_reason_code_id,
+    'TERMINADO' ESTATUS
+  FROM
+    etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_ACCOUNT_TBL_UP2DT_VIEW
+  WHERE
+    account_type = 'SUB'
+    AND (lc_state = 'TRM'
+      OR lc_state = 'TWL') ),
+  CIBDUC_P AS (
+  SELECT
+    a.ast_number msisdn,
+    b.customer_id
+  FROM
+    etl-service-proj.BDUC_PROD_Zona_Cruda.BDUC_U_ASSET_UP2DT_VIEW a
+  INNER JOIN
+    etl-service-proj.BDUC_PROD_Zona_Cruda.BDUC_U_ASSET_CUSTOMER_UP2DT_VIEW b
+  ON
+    b.asset_id = a.asset_id
+    AND atc_rl_type_cd='Afiliado'),
+  PLAN AS (
+    SELECT
+      GOLD_EVENT_MAPPING_TBL.Value MSISDN,
+      SOLD_PRODUCT_NAME CODIGO_PLAN,
+      ZPT.TXTLG PLAN_COMERCIAL,
+      ZPT.zsutipprd TIPO_PRODUCTO
+    FROM
+      etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_SOLD_PRODUCT_TBL_UP2DT_VIEW GOLD_SOLD_PRODUCT_TBL
+    INNER JOIN
+      etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_EVENT_MAPPING_TBL_UP2DT_VIEW GOLD_EVENT_MAPPING_TBL
+    ON
+      GOLD_EVENT_MAPPING_TBL.ACCOUNT_FK=GOLD_SOLD_PRODUCT_TBL.ACCOUNT_FK
+      AND GOLD_EVENT_MAPPING_TBL.EXT_ID_TYPE_CODE_ID='2'
+    LEFT OUTER JOIN
+      etl-service-proj.DWHL_DEV.PLAN_TELEFONIA ZPT
+    ON
+      ZPT.ZPLANGSM = GOLD_SOLD_PRODUCT_TBL.SOLD_PRODUCT_NAME
+    WHERE
+      SUBSTR(GOLD_SOLD_PRODUCT_TBL.SOLD_PRODUCT_NAME,1,15) LIKE 'T_%'
+      AND GOLD_SOLD_PRODUCT_TBL.IS_DEAD = 0 ),
+  SIM AS (
+  SELECT
+    PORT.port_num,
+    PORT.SM_ID,
+    SM.SM_SERIALNUM ICCID,
+    CASE
+      WHEN (PORT.PORT_NUM >='734021004550000' AND PORT.PORT_NUM <= '734021004999999' ) THEN 'ESIM'
+      WHEN SM.SMC_ID = 22 THEN 'SIM'
+      WHEN SM.SMC_ID = 21 THEN 'SIM Rutero'
+      WHEN SM.SMC_ID = 20 THEN 'USIM'
+      ELSE NULL
+    END AS TIPO_SIMCARD
+  FROM
+    etl-service-proj.EB20_PROD_Zona_Cruda.SYSADM_PORT_UP2DT_VIEW PORT
+  INNER JOIN
+    etl-service-proj.EB20_PROD_Zona_Cruda.SYSADM_STORAGE_MEDIUM_UP2DT_VIEW SM
+  ON
+    SM.sm_id = PORT.SM_ID ),
+  prepago AS (
+  SELECT
+    DISTINCT 'PREPAGO' AS plataforma,
+    CAST(CIBDUC_P.customer_id AS string) AS CUSTOMER_ID,
+    NULL AS CUENTA,
+    NULL AS ID_SUBSCRIPTOR,
+    NULL AS CODIGO_VIP,
+    NULL AS DESC_CODIGO_VIP,
+    ESTATUS.estatus AS ESTATUS_LINEA,
+    a.valid_from FECHA_ACTIVACION,
+    FEINS.FECHA_INSTALL_LINEA,
+    CNTT_P.CANT_TITULARES,
+    NULL AS CURRENCY,
+    NULL AS CICLO_FACTURACION,
+    b.Value MSISDN,
+    a.Value IMSI,
+    PLAN.CODIGO_PLAN,
+    NULL AS PLAN,
+    NULL AS NOMBRES,
+    NULL AS APELLIDOS,
+    NULL AS COMPANY,
+    NULL AS TIPO_IDENTIFICACION,
+    NULL AS IDENTIFICACION,
+    PLAN.PLAN_COMERCIAL,
+    PLAN.TIPO_PRODUCTO,
+    SIM.ICCID,
+    SIM.SM_ID AS SIMCARD,
+    SIM.TIPO_SIMCARD,
+    CANALES.TIPO_ACTIVACION AS TIPO_ACTIVACION,
+    CANALES.TIPO_CANAL AS TIPO_CANAL_ACTIVACION,
+    CANALES.NOMBRE_CANAL AS CANAL_DE_ACTIVACION
+  FROM
+    etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_EVENT_MAPPING_TBL_UP2DT_VIEW a
+  INNER JOIN
+    etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_EVENT_MAPPING_TBL_UP2DT_VIEW b
+  ON
+    b.account_fk = a.account_fk
+    AND b.ext_id_type_code_id ='2'
+    AND PARSE_TIMESTAMP('%F %H:%M:%E*S %Z', b.valid_to) > TIMESTAMP_TRUNC(TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 DAY), DAY)
+  INNER JOIN
+    etl-service-proj.HBDB_PROD_Zona_Cruda.REPGOLD_ACCOUNT_TBL_UP2DT_VIEW GAT
+  ON
+    GAT.ACCOUNT_ID = b.account_fk
+  LEFT OUTER JOIN
+    FEINS_LINEA_P FEINS
+  ON
+    FEINS.MSISDN = B.VALUE
+  LEFT OUTER JOIN
+    CNTT_P
+  ON
+    CNTT_P.MSISDN = B.Value
+  LEFT OUTER JOIN
+    ESTATUS
+  ON
+    ESTATUS.MSISDN = B.Value
+  LEFT OUTER JOIN
+    CIBDUC_P
+  ON
+    CIBDUC_P.MSISDN = B.Value
+  LEFT OUTER JOIN
+    PLAN
+  ON
+    PLAN.MSISDN = B.Value
+  LEFT OUTER JOIN
+    SIM
+  ON
+    SIM.PORT_NUM = A.VALUE
+  LEFT JOIN
+    CANALES
+  ON
+    CANALES.MSISDN = B.Value
+  INNER JOIN
+    params
+  ON
+    DATE(a.valid_from) = params.CAL_DATE
+  WHERE
+    a.ext_id_type_code_id ='1'
+    AND PARSE_TIMESTAMP('%F %H:%M:%E*S %Z', b.valid_to) > TIMESTAMP_TRUNC(TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 DAY), DAY)
+    AND GAT.LC_STATE != 'TRM'
+    AND GAT.LC_STATE != 'TWL'
+)
+SELECT
+  'PREPAGO' AS PLATAFORMA,
+  CUSTOMER_ID,
+  MSISDN,
+  IMSI,
+  ICCID,
+  SIMCARD,
+  TIPO_SIMCARD,
+  CANT_TITULARES,
+  FECHA_ACTIVACION AS FECHA_ACTIVACION_LINEA,
+  FECHA_INSTALL_LINEA,
+  ESTATUS_LINEA,
+  NULL AS ANTIGUEDAD_DE_LA_LINEA,
+  NULL AS FECHA_CORTE,
+  TIPO_ACTIVACION,
+  CANAL_DE_ACTIVACION,
+  TIPO_CANAL_ACTIVACION,
+  CAST(NULL AS STRING)AS CUENTA,
+  CAST(NULL AS INT64) AS CONTRATO_ID,
+  CODIGO_PLAN,
+  PLAN_COMERCIAL,
+  TIPO_PRODUCTO
+FROM
+  prepago

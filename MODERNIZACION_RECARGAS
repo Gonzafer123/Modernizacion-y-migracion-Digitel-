@@ -1,0 +1,264 @@
+-- =================================================================
+-- PROCESO ETL MODERNIZADO PARA BIGQUERY
+-- Migración de INSERT FCTRECARGA desde Oracle
+-- =================================================================
+
+-- 1. CTE Principal con datos base prepago
+WITH base_prepago_data AS (
+  SELECT 
+    A.*,
+    COALESCE(TIPO.id_tipo_comercio, 0) AS id_tipo_comercio,
+    COALESCE(SUBTIPO.id_subtipo_comercio, 11) AS id_subtipo_comercio
+  FROM 
+    `proyecto.dataset.ptf_prepagos` A
+  LEFT JOIN (
+    -- Subtipos de comercio registrados
+    SELECT 
+      E.codigo,
+      E.descripcion,
+      E.tipo,
+      E.co_institucion,
+      D.id_subtipo_comercio
+    FROM 
+      `proyecto.dataset.comercios` E
+    LEFT JOIN 
+      `proyecto.dataset.dim_subtipo_comercio` D
+    ON TRIM(UPPER(E.tipo)) = TRIM(UPPER(D.descripcion))
+    WHERE E.co_institucion = '001'
+    
+    UNION ALL
+    
+    -- Comercios terceros no registrados
+    SELECT DISTINCT
+      A.comercio AS codigo,
+      NULL AS descripcion,
+      'Terceros' AS tipo,
+      '001' AS co_institucion,
+      11 AS id_subtipo_comercio
+    FROM 
+      `proyecto.dataset.ptf_prepagos` A
+    WHERE 
+      A.institucion = '001'
+      AND A.fecha BETWEEN '20250726' AND '20250801'
+      AND NOT EXISTS (
+        SELECT 1 
+        FROM `proyecto.dataset.comercios` 
+        WHERE codigo = A.comercio
+      )
+  ) SUBTIPO
+  ON A.institucion = SUBTIPO.co_institucion
+  AND A.comercio = SUBTIPO.codigo
+  
+  LEFT JOIN (
+    SELECT 
+      DTC.id_tipo_comercio,
+      DTI.id_institucion
+    FROM 
+      `proyecto.dataset.dim_tipo_comercio` DTC
+    CROSS JOIN 
+      `proyecto.dataset.dim_institucion` DTI
+    WHERE TRIM(UPPER(DTC.descripcion)) = TRIM(UPPER(DTI.id_tipo_comercio))
+  ) TIPO
+  ON A.institucion = TIPO.id_institucion
+  
+  WHERE 
+    A.fecha BETWEEN '20250726' AND '20250801'
+    AND A.denominacion IN (
+      SELECT id_denominacion 
+      FROM `proyecto.dataset.dim_denominacion`
+    )
+    AND TRIM(A.estado_prepago) IN (
+      'PREPAGOACEPTADO',
+      'PROCESODEPREPAGO', 
+      'PROCESODEREINYECCION',
+      'PROCESOENREINYECCION',
+      'VALIDACIONRECHAZADA2',
+      'VALIDACIONRECHAZADA',
+      'PREPAGOANULADO',
+      'VALIDACIONACEPTADA'
+    )
+),
+
+-- 2. Filtrado de números GSM excluidos
+filtered_prepago AS (
+  SELECT bp.*
+  FROM base_prepago_data bp
+  LEFT JOIN `proyecto.dataset.catdw_gsm_excluido` excl
+  ON bp.telefono = excl.gsm
+  WHERE excl.gsm IS NULL
+),
+
+-- 3. Agregación de datos por grupos lógicos
+aggregated_data AS (
+  SELECT
+    institucion,
+    fecha,
+    hora,
+    TRIM(telefono) AS telefono,
+    comercio,
+    denominacion,
+    CASE 
+      WHEN forma_de_pago IS NULL OR TRIM(forma_de_pago) = '' 
+      THEN 'NA' 
+      ELSE forma_de_pago 
+    END AS forma_de_pago,
+    estado_prepago,
+    canal,
+    cedula,
+    MAX(fecha_conc) AS fecha_conc,
+    SUM(denominacion) AS mto_recarga,
+    COUNT(*) AS nro_recarga,
+    id_tipo_comercio,
+    id_subtipo_comercio,
+    bandera,
+    trace_id,
+    terminal,
+    motivo,
+    estado_conciliacion,
+    codigo_validacion,
+    usuario_prepago,
+    origen_prepago,
+    monto_institucion
+  FROM filtered_prepago
+  GROUP BY
+    institucion, fecha, hora, telefono, comercio, denominacion,
+    forma_de_pago, estado_prepago, canal, cedula, id_tipo_comercio,
+    id_subtipo_comercio, bandera, trace_id, terminal, motivo,
+    estado_conciliacion, codigo_validacion, usuario_prepago,
+    origen_prepago, monto_institucion
+),
+
+-- 4. Enriquecimiento con datos de comercio
+enriched_data AS (
+  SELECT
+    ag.*,
+    COALESCE(ag.comercio, '9999999999') AS id_comercio_ref,
+    CASE 
+      WHEN ag.comercio = '9999999999' 
+      THEN LPAD(LTRIM(ag.comercio), 10, '0')
+      ELSE '' 
+    END AS referencia,
+    COALESCE(dc.id_tipo_lotero, 9) AS id_tipo_lotero,
+    SUM(ag.mto_recarga) AS total_mto_recarga,
+    SUM(ag.nro_recarga) AS total_nro_recarga
+  FROM aggregated_data ag
+  LEFT JOIN `proyecto.dataset.dim_comercio` dc
+  ON ag.comercio = dc.id_comercio
+  AND ag.institucion = dc.co_institucion
+  AND ag.id_tipo_comercio = dc.id_tipo_comercio
+  GROUP BY ALL
+),
+
+-- 5. Asignación de dimensiones temporales
+time_enriched AS (
+  SELECT
+    ed.*,
+    dt.id_tiempo
+  FROM enriched_data ed
+  INNER JOIN `proyecto.dataset.dim_tiempo` dt
+  ON dt.fecha = ed.fecha
+),
+
+-- 6. Lógica de negocio para tipos de tercero
+business_logic AS (
+  SELECT
+    te.*,
+    -- Lógica compleja para ID_TIPO_TERCERO
+    CASE 
+      WHEN te.id_tipo_comercio = 9 THEN
+        CASE 
+          WHEN te.denominacion = 2000 THEN 1
+          ELSE 
+            CASE 
+              WHEN inst.id_tipo_tercero IS NULL THEN 3
+              ELSE CAST(COALESCE(inst.id_tipo_tercero, 0) AS INT64)
+            END
+        END
+      ELSE 3 
+    END AS id_tipo_tercero,
+    
+    -- Otras transformaciones de negocio
+    COALESCE(te.canal, '99') AS canal_final,
+    inst.id_tipo_comercio AS id_tipo_comercio_inst
+    
+  FROM time_enriched te
+  LEFT JOIN `proyecto.dataset.dim_institucion` inst
+  ON inst.id_institucion = te.institucion
+)
+
+-- =================================================================
+-- INSERCIÓN FINAL EN LA TABLA DE HECHOS
+-- =================================================================
+INSERT INTO `proyecto.dataset.fct_recarga` (
+  id_tiempo,
+  id_canal_recarga,
+  id_comercio,
+  id_denominacion,
+  id_institucion,
+  id_tipo_comercio,
+  id_forma_de_pago,
+  id_tipo_telefonia,
+  id_tipo_lotero,
+  id_tipo_tercero,
+  gsm,
+  hora,
+  nro_recarga,
+  mto_recarga,
+  fecha_conc,
+  estado_prepago,
+  insert_date,
+  referencia,
+  id_subtipo_comercio,
+  bandera,
+  trace_id,
+  terminal,
+  motivo,
+  estado_conciliacion,
+  codigo_validacion,
+  usuario_prepago,
+  origen_prepago,
+  monto_institucion
+)
+SELECT
+  bl.id_tiempo,
+  bl.canal_final AS id_canal_recarga,
+  bl.id_comercio_ref AS id_comercio,
+  bl.denominacion AS id_denominacion,
+  bl.institucion AS id_institucion,
+  bl.id_tipo_comercio,
+  bl.forma_de_pago AS id_forma_de_pago,
+  
+  -- Lógica para tipo de telefonía basada en prefijo GSM
+  CASE 
+    WHEN SUBSTR(bl.telefono, 0, 4) IN ('0412', '0422') THEN 1 
+    ELSE 2 
+  END AS id_tipo_telefonia,
+  
+  bl.id_tipo_lotero,
+  bl.id_tipo_tercero,
+  TRIM(bl.telefono) AS gsm,
+  bl.hora,
+  bl.total_nro_recarga AS nro_recarga,
+  bl.total_mto_recarga AS mto_recarga,
+  bl.fecha_conc,
+  TRIM(bl.estado_prepago) AS estado_prepago,
+  FORMAT_DATE('%Y%m%d', CURRENT_DATE()) AS insert_date,
+  bl.referencia,
+  
+  -- Lógica especial para subtipo de comercio
+  CASE 
+    WHEN bl.denominacion = 2000 THEN 12 
+    ELSE bl.id_subtipo_comercio 
+  END AS id_subtipo_comercio,
+  
+  bl.bandera,
+  TRIM(bl.trace_id) AS trace_id,
+  TRIM(bl.terminal) AS terminal,
+  bl.motivo,
+  TRIM(bl.estado_conciliacion) AS estado_conciliacion,
+  bl.codigo_validacion,
+  bl.usuario_prepago,
+  TRIM(bl.origen_prepago) AS origen_prepago,
+  bl.monto_institucion
+  
+FROM business_logic bl;
