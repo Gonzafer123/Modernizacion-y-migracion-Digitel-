@@ -1,0 +1,185 @@
+WITH CONTRACT_UNION as
+  (
+					(
+          SELECT  CSC_A.CO_ID   CO_ID,
+                  DN_A.DN_NUM   MSISDN,
+                  NULL          IMSI
+					FROM    BSCSDB.CONTR_SERVICES_CAP   CSC_A,
+                  BSCSDB.DIRECTORY_NUMBER     DN_A
+					WHERE   DN_A.DN_ID = CSC_A.DN_ID
+					        AND upper(CSC_A.MAIN_DIRNUM) = 'X'
+                  AND CSC_A.cs_deactiv_date IS NULL
+					        AND CSC_A.SEQNO = (SELECT MAX (SEQNO)
+												              FROM  BSCSDB.CONTR_SERVICES_CAP CSC_A1
+												              WHERE CSC_A.DN_ID = CSC_A1.DN_ID
+																            AND CSC_A1.CO_ID = CSC_A.CO_ID)
+                  AND NOT EXISTS  (SELECT CSP_A.CO_ID
+								                    FROM  BSCSDB.CONTR_SERVICES_PORT CSP_A
+								                    WHERE CSP_A.CO_ID = CSC_A.CO_ID)
+          )
+					UNION ALL
+					(
+          SELECT  CO_ID_A     CO_ID,
+                  MSISDN_A    MSISDN,
+                  IMSI_B      IMSI
+					  FROM
+                  (SELECT A.CO_ID  CO_ID_A,
+									        A.MSISDN MSISDN_A,
+									        A.IMSI,
+									        B.CO_ID,
+									        B.MSISDN,
+									        B.IMSI   IMSI_B
+						      FROM   (SELECT  CO_X.CO_ID    CO_ID,
+										              DN_X.DN_NUM   MSISDN,
+										              NULL          IMSI
+								          FROM    BSCSDB.CONTRACT_ALL CO_X,
+										              BSCSDB.CONTR_SERVICES_CAP CSC_X,
+										              BSCSDB.DIRECTORY_NUMBER DN_X
+							          	WHERE 	CSC_X.CO_ID = CO_X.CO_ID
+										              AND DN_X.DN_ID = CSC_X.DN_ID
+										              AND upper(CSC_X.MAIN_DIRNUM) = 'X'
+                                  AND CSC_X.cs_deactiv_date IS NULL
+										              AND CSC_X.SEQNO =(SELECT MAX (SEQNO)
+															                      FROM  BSCSDB.CONTR_SERVICES_CAP CSC_X1
+															                      WHERE CSC_X1.CO_ID = CSC_X.CO_ID
+																	                        AND CSC_X1.DN_ID = CSC_X.DN_ID)
+                          ) A,
+												  (SELECT CO_Y.CO_ID    CO_ID,
+																	NULL          MSISDN,
+																	P_X.PORT_NUM  IMSI
+													FROM    BSCSDB.CONTRACT_ALL CO_Y,
+																	BSCSDB.CONTR_SERVICES_PORT CSP_X,
+																	BSCSDB.PORT P_X
+													WHERE   CSP_X.CO_ID = CO_Y.CO_ID
+																	AND P_X.PORT_ID = CSP_X.PORT_ID
+                                  AND upper(CSP_X.csp_status) ='A'
+																	AND CSP_X.CSP_SEQNO = (SELECT MAX (CSP_SEQNO)
+																												  FROM    BSCSDB.CONTR_SERVICES_PORT  CSP_X1
+																												  WHERE   CSP_X1.CO_ID = CSP_X.CO_ID
+																																  AND CSP_X1.PORT_ID = CSP_X.PORT_ID)
+                          ) B
+								  WHERE   A.CO_ID = B.CO_ID)
+          )
+  )  ,
+  FEINS_LINEA AS
+  (SELECT a.ast_number msisdn, a.ast_install_dt fecha_install_linea  FROM  bduc.u_asset a),
+  CNTT AS
+   (SELECT a.ast_number msisdn, Count(DISTINCT b.customer_id) cant_titulares
+   FROM bduc.u_asset a
+   INNER JOIN bduc.u_asset_customer b ON  b.asset_id = a.asset_id AND  atc_rl_type_cd='Afiliado'
+   GROUP BY a.ast_number),
+  CIBDUC AS
+  (SELECT a.ast_number msisdn, b.customer_id
+   FROM bduc.u_asset a
+   INNER JOIN bduc.u_asset_customer b ON  b.asset_id = a.asset_id AND  b.atc_rl_type_cd='Afiliado'
+   WHERE b.created_dt = (SELECT Max(d.created_dt) FROM bduc.u_asset c 
+                          INNER JOIN bduc.u_asset_customer d ON  d.asset_id = c.asset_id AND  d.atc_rl_type_cd='Afiliado'
+                         WHERE c.ast_number = a.ast_number))
+
+SELECT 	  CUSTOMER_ID_EB20,
+          CUSTOMER_ID,
+	      CUENTA,
+		  ID_SUBSCRIPTOR,
+          NUMERO_SUBSCRIPTOR,
+		  CODIGO_VIP,
+          DESC_CODIGO_VIP,
+          CASE
+          WHEN SA_SSTAT = 'ACTIVE' THEN 'Suspensión por Anulación'
+          WHEN STDC_SSTAT = 'ACTIVE' THEN 'Suspensión Temporal'
+          WHEN SRE_SSTAT = 'ACTIVE' THEN 'Suspensión Robo o Extravio'
+          WHEN ST_SSTAT = 'ACTIVE' THEN 'Suspensión Total (DC)'
+          WHEN SPF_SSTAT = 'ACTIVE' THEN 'Suspensión por Fraude'
+          ELSE 'Servicio Activo'
+          END AS ESTATUS_LINEA ,
+		  FECHA_ACTIVACION,
+		  FECHA_INSTALL_LINEA,
+          CANT_TITULARES,
+		  CURRENCY,
+		  CICLO_FACTURACION,
+		  MSISDN,
+		  IMSI,
+		  CODIGO_PLAN,
+		  PLAN,
+		  NOMBRES,
+		  APELLIDOS,
+		  COMPANY,
+		  TIPO_IDENTIFICACION,
+		  IDENTIFICACION,
+          PLAN_COMERCIAL,
+          TIPO_PRODUCTO
+		  FROM   (SELECT  	CU.CUSTOMER_ID        AS CUSTOMER_ID_EB20,
+							CIBDUC.CUSTOMER_ID    AS CUSTOMER_ID,
+							CU.CUSTNUM            AS CUENTA,
+						    CU.PRGCODE            AS CODIGO_VIP,
+							PR.PRGNAME            AS DESC_CODIGO_VIP,
+						    CO.CO_ID              AS ID_SUBSCRIPTOR,
+							CO.CO_CODE            AS NUMERO_SUBSCRIPTOR,
+							CO.CH_STATUS          AS ESTATUS_LINEA,
+						    CO.CO_ACTIVATED       AS FECHA_ACTIVACION,
+							FEINS_LINEA.FECHA_INSTALL_LINEA,
+							CNTT.CANT_TITULARES,
+						    FC.FCDESC             AS CURRENCY,
+						    BAH.BILLCYCLE         AS CICLO_FACTURACION,
+						    CONTRACT_UNION.MSISDN AS MSISDN,
+						    CONTRACT_UNION.IMSI   AS IMSI,
+						    RP.SHDES              AS CODIGO_PLAN,
+						    RP.DES                AS PLAN,
+						    InitCap(cca.ccfname)  AS NOMBRES ,
+						    InitCap(cca.cclname)  AS APELLIDOS,
+						    InitCap(ccname)       AS COMPANY ,
+						    SubStr(cca.cssocialsecno,1,1) AS TIPO_IDENTIFICACION,
+						    SubStr(cca.cssocialsecno,2)  AS IDENTIFICACION,
+							ZPT.TXTLG                      AS PLAN_COMERCIAL,
+							ZPT.ZSUTIPPRD                AS TIPO_PRODUCTO,
+						    SN.DES                AS "SERVICE CODE",
+						    PSSH.STATUS           AS "SERVICE STATUS"
+						  FROM 		BSCSDB.CUSTOMER_ALL                 CU,
+							        BSCSDB.FORCURR                      FC,
+							        BSCSDB.BILLCYCLE_ASSIGNMENT_HISTORY BAH,
+							        BSCSDB.CONTRACT_ALL                 CO,
+							        BSCSDB.CONTRACT_HISTORY             CH,
+							        BSCSDB.RATEPLAN                     RP,
+							        BSCSDB.CONTR_SERVICES_CAP           CSC,
+							        BSCSDB.CONTR_SERVICES_PORT          CSP,
+							        BSCSDB.MPUSNTAB                     SN,
+							        BSCSDB.PR_SERV_STATUS_HIST          PSSH,
+							        BSCSDB.CCONTACT_ALL                 CCA,
+							        BSCSDB.PRICEGROUP_ALL               PR,
+							        CONTRACT_UNION,
+									FEINS_LINEA,
+									CNTT,
+									CIBDUC,
+									DWHDTS.ZCATALOGO_PLAN_TELEFONIA1    ZPT
+						  WHERE CO.CUSTOMER_ID = CU.CUSTOMER_ID
+							AND CONTRACT_UNION.CO_ID = CO.CO_ID
+							AND FC.FC_ID = CU.CURRENCY
+							AND BAH.CUSTOMER_ID = CU.CUSTOMER_ID
+							AND CCA.CUSTOMER_ID= CU.CUSTOMER_ID
+							AND CCA.CCSEQ='1'
+							AND CU.PRGCODE = PR.PRGCODE
+							AND BAH.SEQNO = (SELECT MAX (SEQNO) FROM BSCSDB.BILLCYCLE_ASSIGNMENT_HISTORY WHERE CUSTOMER_ID = CU.CUSTOMER_ID)
+							AND CH.CO_ID = CONTRACT_UNION.CO_ID
+							AND CSP.CO_ID(+) = CONTRACT_UNION.CO_ID
+							AND CSC.CO_ID(+) = CONTRACT_UNION.CO_ID
+							AND CH.CH_SEQNO = (SELECT  MAX (CH_SEQNO) FROM   BSCSDB.CONTRACT_HISTORY WHERE CO_ID = CO.CO_ID)
+							AND RP.TMCODE = CO.TMCODE
+							AND FEINS_LINEA.MSISDN(+) = CONTRACT_UNION.MSISDN
+							AND CNTT.MSISDN(+) = CONTRACT_UNION.MSISDN
+							AND CIBDUC.MSISDN(+) = CONTRACT_UNION.MSISDN
+							AND ZPT.ZPLANGSM(+) = 'POS'||RP.SHDES
+							AND PSSH.CO_ID = CO.CO_ID
+							AND PSSH.SNCODE = SN.SNCODE
+							AND PSSH.HISTNO =  (SELECT MAX (HISTNO) FROM BSCSDB.PR_SERV_STATUS_HIST WHERE CO_ID = CO.CO_ID AND SNCODE = SN.SNCODE))
+					PIVOT
+					(MAX (DECODE ("SERVICE STATUS",
+								   'A', 'ACTIVE',
+								   'D', 'DEACTIVE',
+								   'S', 'SUSPENDED',
+								   ''))
+					SSTAT
+					FOR "SERVICE CODE"
+					IN ('Suspensión por Anulación' AS SA,
+							'Suspensión Temporal' AS STDC,
+							'Suspensión Robo o Extravío' AS SRE,
+							'Suspensión Total (DC)' AS ST,
+							'Suspensión por Fraude' AS SPF))
